@@ -1,0 +1,45 @@
+{
+  "name": "tokenledger",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "本机 Coding AI 工具的 Token 账本 —— 统计 Codex / Claude Code / OpenCode / DSH / Gemini CLI 的模型用量、Token 消耗与吞吐速率",
+  "keywords": [
+    "ai",
+    "llm",
+    "token",
+    "usage",
+    "analytics",
+    "dashboard",
+    "codex",
+    "claude-code",
+    "opencode",
+    "deepseek",
+    "gemini-cli"
+  ],
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "scripts": {
+    "dev": "concurrently -n server,web -c cyan,magenta \"npm:dev:server\" \"npm:dev:web\"",
+    "dev:server": "node --watch server/index.js",
+    "dev:web": "vite",
+    "build": "vite build",
+    "start": "node server/index.js",
+    "scan": "node server/cli.js scan",
+    "test": "node --test server/*.test.js server/collectors/*.test.js",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.4",
+    "concurrently": "^9.1.0",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.5"
+  }
+}
