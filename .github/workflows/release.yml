@@ -39,7 +39,9 @@ jobs:
           - label: Windows (x64)
             os: windows-latest
             target: x86_64-pc-windows-msvc
-            args: ""
+            # 必须显式带 --target，否则产物落在 target/release/ 而不是
+            # target/x86_64-pc-windows-msvc/release/，与上面的上传路径对不上
+            args: "--target x86_64-pc-windows-msvc"
             ext: msi
 
     steps:
@@ -120,14 +122,27 @@ jobs:
       - name: 构建 Tauri 应用
         run: npx tauri build ${{ matrix.args }} --bundles ${{ matrix.ext == 'dmg' && 'dmg' || 'msi,nsis' }}
 
-      - name: 上传产物
+      # 分平台上传：之前三个平台的 glob 全列在一起，
+      # upload-artifact 的 if-no-files-found: error 是「所有 pattern 都没命中
+      # 才报错」，所以 Windows 上必然因为找不到 *.dmg 而失败 ——
+      # 哪怕 msi 和 exe 都好好地产出来了。
+      - name: 上传产物（macOS）
+        if: runner.os != 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: tokenledger-${{ matrix.target }}
+          if-no-files-found: error
+          retention-days: 14
+          path: desktop/src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg
+
+      - name: 上传产物（Windows）
+        if: runner.os == 'Windows'
         uses: actions/upload-artifact@v4
         with:
           name: tokenledger-${{ matrix.target }}
           if-no-files-found: error
           retention-days: 14
           path: |
-            desktop/src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg
             desktop/src-tauri/target/${{ matrix.target }}/release/bundle/msi/*.msi
             desktop/src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*.exe
 
