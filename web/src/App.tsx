@@ -10,6 +10,7 @@ import {
   ToolModelMatrix,
   TrendChart,
 } from "./components/Charts";
+import { ColdStartSection, ProjectSection } from "./components/Insights";
 import { MallSection } from "./components/Mall";
 import ScanFlow from "./components/ScanFlow";
 import { fetchDashboard, triggerReset, triggerScan } from "./api";
@@ -613,6 +614,10 @@ export default function App() {
       </section>
 
       <RateSection data={data} />
+
+      <ProjectSection rows={data.projects} />
+
+      <ColdStartSection data={data.coldStart} />
 
       <MallSection
         costUsd={o.cost_usd}

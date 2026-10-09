@@ -178,6 +178,50 @@ export interface RateData {
   summary: { activeMinutes: number; totalTokens: number; avgPerMinute: number; peakPerMinute: number };
 }
 
+/** 按 cwd 聚合的项目账单 */
+export interface ProjectRow {
+  cwd: string;
+  requests: number;
+  total_tokens: number;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  cost_usd: number;
+  first_day: string;
+  last_day: string;
+  sessions: number;
+  models: number;
+  cache_hit_rate: number;
+}
+
+/** 会话内第 N 次请求的聚合点 */
+export interface ColdStartCurvePoint {
+  rn: number;
+  requests: number;
+  input_tokens: number;
+  cache_read_tokens: number;
+  total_tokens: number;
+  cost_usd: number;
+  cache_hit_rate: number;
+}
+
+export interface ColdStartData {
+  sessions: number;
+  firstRequest: ColdStartCurvePoint | null;
+  secondRequest: ColdStartCurvePoint | null;
+  curve: ColdStartCurvePoint[];
+  /** 首请求缓存命中率 */
+  coldHitRate: number;
+  /** 第 2 次请求的命中率 */
+  warmHitRate: number;
+  /** 冷启动溢价总额，无样本时为 null */
+  coldPremiumUsd: number | null;
+  coldPremiumPerSession: number | null;
+  /** 缓存读相对 input 的折扣倍数 */
+  discount: number;
+}
+
 export interface ScanRun {
   id: number;
   started_at: number;
@@ -219,6 +263,8 @@ export interface Dashboard {
   hourly: HourRow[];
   weekday: { dow: number; requests: number; total_tokens: number }[];
   rate: RateData;
+  projects: ProjectRow[];
+  coldStart: ColdStartData;
   sessions: SessionRow[];
   recentEvents: EventRow[];
   lastScan: ScanRun | null;

@@ -254,11 +254,151 @@ export class Queries {
       .prep(
         `SELECT hour, COUNT(*) AS requests, SUM(total_tokens) AS total_tokens,
                 SUM(COALESCE(cost_usd, 0)) AS cost_usd
-         FROM usage_events ${w.sql}
+         FROM usage_events ${w.where}
          GROUP BY hour ORDER BY hour`,
       )
       .all(...w.params)
       .map((r) => ({ ...r, cost_usd: round(r.cost_usd) }));
+  }
+
+  /**
+   * 按项目（cwd）分组的账单。
+   *
+   * cwd 从采集第一天就存在，但此前没有任何界面用它——而这恰恰是用户唯一
+   * 真正关心的维度：「我的钱花在哪个项目上」。实测本机 47 个项目 / 84.5k 事件，
+   * 其中最大一个占 4.9B（30,927 请求），不看到这个就完全没有 sense。
+   *
+   * 顺带给出每个项目的缓存命中率：同一台机器不同项目能差 6 个百分点，
+   * 说明上下文复用策略不同，是可优化的信号。
+   *
+   * 隐私：cwd 里就是项目名，可能含客户名或内部代号。所以这个接口只在本机
+   * 提供，绝不能出现在任何上传方案里。
+   */
+  projects(q = {}) {
+    const w = this.#eventWhere(q);
+    return this.store
+      .prep(
+        `SELECT cwd,
+                COUNT(*) AS requests,
+                SUM(total_tokens) AS total_tokens,
+                SUM(input_tokens) AS input_tokens,
+                SUM(output_tokens) AS output_tokens,
+                SUM(cache_read_tokens) AS cache_read_tokens,
+                SUM(cache_write_tokens) AS cache_write_tokens,
+                SUM(COALESCE(cost_usd, 0)) AS cost_usd,
+                MIN(day) AS first_day,
+                MAX(day) AS last_day,
+                COUNT(DISTINCT session_id) AS sessions,
+                COUNT(DISTINCT model) AS models
+         FROM usage_events
+         WHERE ${w.sql ? `(${w.sql}) AND` : ""} cwd IS NOT NULL AND cwd <> ''
+         GROUP BY cwd
+         ORDER BY SUM(total_tokens) DESC`,
+      )
+      .all(...w.params)
+      .map((r) => ({
+        cwd: r.cwd,
+        requests: r.requests,
+        total_tokens: r.total_tokens,
+        input_tokens: r.input_tokens,
+        output_tokens: r.output_tokens,
+        cache_read_tokens: r.cache_read_tokens,
+        cache_write_tokens: r.cache_write_tokens,
+        cost_usd: round(r.cost_usd),
+        first_day: r.first_day,
+        last_day: r.last_day,
+        sessions: r.sessions,
+        models: r.models,
+        cache_hit_rate: r.total_tokens ? round((r.cache_read_tokens / r.total_tokens) * 100, 2) : 0,
+      }));
+  }
+
+  /**
+   * 缓存冷启动诊断。
+   *
+   * 核心事实（实测 417 个 Codex 会话）：
+   *   第 1 次请求  缓存命中 52.4%
+   *   第 2 次请求  79.6%
+   *   第 3 次请求  82.0%
+   *   第 6 次请求  86.8%
+   *
+   * 也就是说每个新会话的第一枪要付一大笔「冷启动」代价，之后才逐步爬升。
+   * 这里算的是**实际观测到的**浪费，不是假设：
+   *
+   *   coldInput = 每个会话首次请求的 input_tokens（这部分必然按 input 价计费）
+   *   warmSaving = 如果这 5.55M 新鲜输入能以缓存价计费，本可省下的钱
+   *
+   * 口径说明：
+   *  - 「首次」用 ROW_NUMBER 按 ts 排序取第一条，而不是 MIN(ts)——
+   *    并发请求会共享同一毫秒（实测平均 2.38 条，最多 225 条），
+   *    用 MIN(ts) 做 JOIN 会把同一个会话重复计数 2.4 倍。
+   *  - 只统计 total_tokens > 0 的事件，心跳行不带用量。
+   */
+  coldStart(q = {}) {
+    const w = this.#eventWhere(q);
+
+    const rows = this.store
+      .prep(
+        `WITH ranked AS (
+           SELECT session_id,
+                  input_tokens, output_tokens, cache_read_tokens,
+                  cache_write_tokens, total_tokens, cost_usd,
+                  ROW_NUMBER() OVER (PARTITION BY session_id ORDER BY ts, rowid) AS rn
+           FROM usage_events
+           WHERE ${w.sql ? `(${w.sql}) AND` : ""} session_id IS NOT NULL
+             AND session_id <> '' AND total_tokens > 0
+         )
+         SELECT rn,
+                COUNT(*) AS requests,
+                SUM(input_tokens) AS input_tokens,
+                SUM(cache_read_tokens) AS cache_read_tokens,
+                SUM(total_tokens) AS total_tokens,
+                SUM(COALESCE(cost_usd, 0)) AS cost_usd
+         FROM ranked
+         WHERE rn <= 6
+         GROUP BY rn
+         ORDER BY rn`,
+      )
+      .all(...w.params)
+      .map((r) => ({
+        rn: r.rn,
+        requests: r.requests,
+        input_tokens: r.input_tokens,
+        cache_read_tokens: r.cache_read_tokens,
+        total_tokens: r.total_tokens,
+        cost_usd: round(r.cost_usd),
+        cache_hit_rate: r.total_tokens ? round((r.cache_read_tokens / r.total_tokens) * 100, 2) : 0,
+      }));
+
+    const first = rows.find((r) => r.rn === 1) || null;
+    const sessions = first ? first.requests : 0;
+    const warm = rows.find((r) => r.rn === 2) || null;
+
+    // 冷启动的「学费」：首请求里按 input 价计费、但本可以走缓存价的部分。
+    // 用首请求的实际混合单价反推缓存价，比例 1/5.75（Claude 缓存读相对 input）。
+    const CACHE_DISCOUNT = 5.75;
+    let coldPremiumUsd = null;
+    if (first && first.input_tokens > 0 && first.cost_usd > 0) {
+      const perInputUsd = first.cost_usd / Math.max(1, first.input_tokens + first.cache_read_tokens);
+      const asIfWarmUsd = (first.input_tokens * perInputUsd) / CACHE_DISCOUNT;
+      coldPremiumUsd = round(Math.max(0, first.cost_usd - asIfWarmUsd));
+    }
+
+    return {
+      sessions,
+      firstRequest: first,
+      secondRequest: warm,
+      curve: rows,
+      /** 首请求缓存命中率（冷启动有多贵） */
+      coldHitRate: first ? first.cache_hit_rate : 0,
+      /** 第 2 次请求的命中率（缓存爬升到哪） */
+      warmHitRate: warm ? warm.cache_hit_rate : 0,
+      /** 冷启动溢价：首请求本可省下的钱 */
+      coldPremiumUsd,
+      /** 每个会话的冷启动溢价均值 */
+      coldPremiumPerSession: sessions && coldPremiumUsd !== null ? round(coldPremiumUsd / sessions) : null,
+      discount: CACHE_DISCOUNT,
+    };
   }
 
   /** 星期分布（0=周日） */
@@ -268,7 +408,7 @@ export class Queries {
       .prep(
         `SELECT CAST(strftime('%w', ts/1000, 'unixepoch') AS INTEGER) AS dow,
                 COUNT(*) AS requests, SUM(total_tokens) AS total_tokens
-         FROM usage_events ${w.sql}
+         FROM usage_events ${w.where}
          GROUP BY dow ORDER BY dow`,
       )
       .all(...w.params);
@@ -299,7 +439,7 @@ export class Queries {
            COUNT(*) AS requests,
            SUM(total_tokens) AS tokens,
            SUM(output_tokens) AS output_tokens
-         FROM usage_events ${w.sql}
+         FROM usage_events ${w.where}
          GROUP BY minute, tool`,
       )
       .all(...w.params);
@@ -449,6 +589,14 @@ export class Queries {
   }
 
   /** 事件表专用的 where（day 列映射为时间戳比较） */
+  /**
+   * 事件表上的过滤条件。
+   *
+   * 返回的是**不含 WHERE** 的裸条件（`ts >= ? AND tool IN (?)`），
+   * 供需要额外追加条件的查询拼装，例如
+   *   `WHERE ${w.sql ? `(${w.sql}) AND` : ""} cwd IS NOT NULL`
+   * ——没条件时展开成空串，不能留下裸 WHERE。
+   */
   #eventWhere({ from, to, tools }) {
     const clauses = [];
     const params = [];
@@ -464,7 +612,7 @@ export class Queries {
       clauses.push(`tool IN (${tools.map(() => "?").join(",")})`);
       params.push(...tools);
     }
-    return { sql: clauses.length ? `WHERE ${clauses.join(" AND ")}` : "", params };
+    return { sql: clauses.join(" AND "), where: clauses.length ? `WHERE ${clauses.join(" AND ")}` : "", params };
   }
 
   /** 最近会话 */

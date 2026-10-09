@@ -90,6 +90,8 @@ function dashboardPayload(range) {
     hourly: queries.hourly(range),
     weekday: queries.weekday(range),
     rate: queries.rate(range),
+    projects: queries.projects(range),
+    coldStart: queries.coldStart(range),
     sessions: queries.sessions(range),
     recentEvents: queries.recentEvents({ ...range, limit: 40 }),
     lastScan: store.lastScan(),
@@ -123,6 +125,11 @@ const routes = {
   "GET /api/hourly": (range) => queries.hourly(range),
 
   "GET /api/rate": (range) => queries.rate(range),
+
+  // 项目维度含 cwd（可能含客户名 / 内部代号），只在本机提供，绝不外传
+  "GET /api/projects": (range) => queries.projects(range),
+
+  "GET /api/cold-start": (range) => queries.coldStart(range),
 
   "GET /api/weekday": (range) => queries.weekday(range),
 

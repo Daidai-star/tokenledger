@@ -1238,6 +1238,12 @@ code {
   margin-top: 2px;
 }
 
+/* 副标题里的强调数字：默认色太弱，提上来跟正文一致 */
+.rate-cell .s b {
+  color: var(--ink-2);
+  font-weight: 500;
+}
+
 .rate-cell.primary .v {
   color: var(--accent);
 }
@@ -1273,6 +1279,20 @@ code {
 .peak-note b {
   color: var(--ink);
   font-weight: 500;
+}
+
+/* ---------------------------------------------------------- 项目路径 */
+
+/* cwd 用等宽体并截断：完整路径可能很长，且含客户名，不需要横向撑开表格 */
+.proj-path {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  display: inline-block;
+  max-width: 22ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
 }
 
 /* ---------------------------------------------------------- 会话 / 事件 */
