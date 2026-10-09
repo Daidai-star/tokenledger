@@ -93,6 +93,56 @@ async function download(url, dest) {
 }
 
 /**
+ * 在解压后的目录里找 node 可执行文件。
+ *
+ * 不假设归档的目录结构（第一版假设「版本目录 / node.exe」，CI 上 Windows 侧
+ * 就因 Expand-Archive 的实际落盘结构对不上而 ENOENT）。
+ *
+ * 做法是收集所有候选，再按优先级挑：
+ *   1. `.../bin/node`  —— Unix 官方包的标准位置，最不容易撞名
+ *   2. `.../node.exe`  —— Windows 官方包
+ *   3. 任意 `node.exe`  —— Windows 兜底
+ *   4. 任意 `node`     —— Unix 兜底
+ *
+ * 注意：匹配与拼接必须用同一套路径。踩过的坑是「按 basename 匹配存在性，
+ * 却按相对路径去 join」，导致 macOS 的 bin/node 永远找不到。
+ */
+function findNodeBinary(dir, isWin) {
+  const wanted = isWin ? "node.exe" : "node";
+  const maxDepth = 6;
+  const hits = [];
+
+  const walk = (cur, depth, rel) => {
+    let entries;
+    try {
+      entries = fs.readdirSync(cur, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      if (e.isFile() && e.name === wanted) {
+        hits.push({ abs: path.join(cur, e.name), rel: rel ? `${rel}/${e.name}` : e.name });
+      }
+    }
+    if (depth >= maxDepth) return;
+    for (const e of entries) {
+      if (!e.isDirectory() || e.name === "node_modules") continue;
+      walk(path.join(cur, e.name), depth + 1, rel ? `${rel}/${e.name}` : e.name);
+    }
+  };
+  walk(dir, 0, "");
+
+  const rank = (h) => {
+    if (h.rel.endsWith(`/bin/${wanted}`)) return 0;
+    if (isWin && h.rel === wanted) return 1;
+    if (!isWin && h.rel === wanted) return 1;
+    return 2;
+  };
+  hits.sort((a, b) => rank(a) - rank(b) || a.rel.length - b.rel.length);
+  return hits.length ? hits[0].abs : null;
+}
+
+/**
  * 解压到 stage。
  *
  * Windows 分支必须用 PowerShell 的 Expand-Archive：`unzip` 在 Windows 上
@@ -113,7 +163,6 @@ function extract(archive, stage, isWin) {
     );
     return;
   }
-  // .tar.gz 用 tar；若是 .zip 也交给 tar（bsdtar 支持）
   execFileSync("tar", ["-xf", archive, "-C", stage], { stdio: ["ignore", "ignore", "inherit"] });
 }
 
@@ -179,19 +228,19 @@ async function main() {
   const stage = fs.mkdtempSync(path.join(os.tmpdir(), "tl-node-"));
   try {
     extract(tmp, stage, isWin);
-    if (isWin) {
-      const inner = fs
-        .readdirSync(stage)
-        .find((d) => fs.statSync(path.join(stage, d)).isDirectory());
-      fs.copyFileSync(path.join(stage, inner, "node.exe"), path.join(OUT, "runtime", "node.exe"));
-    } else {
-      const inner = fs
-        .readdirSync(stage)
-        .find((d) => fs.statSync(path.join(stage, d)).isDirectory());
-      fs.mkdirSync(path.join(OUT, "runtime"), { recursive: true });
-      fs.copyFileSync(path.join(stage, inner, "bin", "node"), path.join(OUT, "runtime", "node"));
-      fs.chmodSync(path.join(OUT, "runtime", "node"), 0o755);
+    const bin = findNodeBinary(stage, isWin);
+    if (!bin) {
+      console.error(
+        `在 ${url} 解压后找不到 ${isWin ? "node.exe" : "bin/node"}，` +
+          `解压目录内容：${fs.readdirSync(stage).join(", ") || "(空)"}`,
+      );
+      process.exit(1);
     }
+    const dest = path.join(OUT, "runtime", isWin ? "node.exe" : "node");
+    fs.mkdirSync(path.join(OUT, "runtime"), { recursive: true });
+    fs.copyFileSync(bin, dest);
+    if (!isWin) fs.chmodSync(dest, 0o755);
+    console.log(`  取自 ${path.relative(stage, bin)}`);
     const mb = (fs.statSync(path.join(OUT, "runtime", isWin ? "node.exe" : "node")).size / 1048576).toFixed(0);
     console.log(`✓ runtime/node${isWin ? ".exe" : ""} (Node ${version}, ${mb} MB)`);
   } finally {

@@ -12,6 +12,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
 const src = fs.readFileSync(new URL("./build-sidecar.mjs", import.meta.url), "utf8");
 
@@ -78,4 +80,86 @@ test("多组参数共存", () => {
   assert.equal(a.get("platform"), "darwin");
   assert.equal(a.get("arch"), "arm64");
   assert.equal(a.get("skip-node"), true);
+});
+
+// ------------------------------------------- 在解压目录里定位 node 可执行文件
+
+/**
+ * 这段逻辑出过两次事故，都只在 Windows 上暴露：
+ *  1. 假设「版本目录 / node.exe」是固定结构 → Expand-Archive 落盘对不上就 ENOENT
+ *  2. 改成递归查找后，用 basename 匹配存在性、却按相对路径 join
+ *     → macOS 的 bin/node 永远找不到
+ *
+ * 下面用**真实的官方归档目录结构**造样本（不下载，避免测试依赖网络）：
+ *  - Windows: node-v24.21.0-win-x64/node.exe（扁平）
+ *  - Unix:    node-v24.13.1-darwin-arm64/bin/node（多一层 bin）
+ * 另外塞几个干扰项（node_modules、嵌套同名文件）确保优先级正确。
+ */
+function loadFinder() {
+  const m = src.match(/function findNodeBinary[\s\S]*?\n  return hits\.length \? hits\[0\]\.abs : null;\n}/);
+  assert.ok(m, "没找到 findNodeBinary，脚本结构可能变了");
+  return eval(`(${m[0]})`);
+}
+const findNodeBinary = loadFinder();
+const norm = (p) => (p ? p.split(path.sep).join("/") : p);
+
+function makeTree(spec) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "tl-tree-"));
+  for (const [rel, size] of Object.entries(spec)) {
+    const p = path.join(root, rel);
+    fs.mkdirSync(path.dirname(p), { recursive: true });
+    fs.writeFileSync(p, Buffer.alloc(size, 1));
+  }
+  return root;
+}
+
+const WIN_TREE = {
+  "node-v24.21.0-win-x64/node.exe": 93580104,
+  "node-v24.21.0-win-x64/README.md": 100,
+  "node-v24.21.0-win-x64/node_modules/corepack/package.json": 50,
+  "node-v24.21.0-win-x64/npm.cmd": 700,
+};
+
+const UNIX_TREE = {
+  "node-v24.13.1-darwin-arm64/bin/node": 116000000,
+  "node-v24.13.1-darwin-arm64/README.md": 100,
+  "node-v24.13.1-darwin-arm64/lib/node_modules/npm/bin/node-cli.js": 50,
+};
+
+test("Windows 归档结构：找到版本目录下的 node.exe", () => {
+  const dir = makeTree(WIN_TREE);
+  const hit = norm(findNodeBinary(dir, true));
+  assert.match(hit, /node-v[\d.]+-win-x64\/node\.exe$/);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("Unix 归档结构：找到 bin/node，而不是版本目录下的别的文件", () => {
+  const dir = makeTree(UNIX_TREE);
+  const hit = norm(findNodeBinary(dir, false));
+  assert.ok(hit.endsWith("/bin/node"), `应命中 bin/node，实际 ${hit}`);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("不会误取 node_modules 里的文件", () => {
+  const dir = makeTree({
+    "node-v1-linux-x64/node_modules/npm/bin/node": 50,
+    "node-v1-linux-x64/README.md": 10,
+  });
+  // 只有 node_modules 里有同名文件时不应命中
+  assert.equal(findNodeBinary(dir, false), null);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("平台不匹配时返回 null（不会把 macOS 的 node 打进 Windows 包）", () => {
+  const win = makeTree(WIN_TREE);
+  const unix = makeTree(UNIX_TREE);
+  assert.equal(findNodeBinary(unix, true), null, "Unix 树里没有 node.exe");
+  assert.equal(findNodeBinary(win, false), null, "Windows 树里没有裸 node");
+  fs.rmSync(win, { recursive: true, force: true });
+  fs.rmSync(unix, { recursive: true, force: true });
+});
+
+test("目录不存在时返回 null 而不是抛错", () => {
+  assert.equal(findNodeBinary("/nonexistent/tl/xyz", false), null);
+  assert.equal(findNodeBinary("/nonexistent/tl/xyz", true), null);
 });
