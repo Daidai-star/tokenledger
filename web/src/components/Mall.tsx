@@ -43,6 +43,7 @@ export interface ShareStats {
 export function MallSection({ costUsd, stats }: Props) {
   const m = useMemo(() => computeMall(costUsd), [costUsd]);
   const empty = !costUsd || m.budget <= 0;
+  const [copied, setCopied] = useState(false);
 
   async function share() {
     if (!m.best) return;
@@ -59,6 +60,48 @@ export function MallSection({ costUsd, stats }: Props) {
       tools: stats.tools,
     });
     downloadBlob(blob, `tokenledger-${new Date().toISOString().slice(0, 10)}.png`);
+  }
+
+  /**
+   * 配图发 X / 朋友圈时直接粘贴的文案。
+   * 只说本机能验证的事实——累计账单折成实物、总量、不含项目路径，
+   * 避免用户贴出去之后被追问「哪家公司哪个项目」。
+   */
+  function shareText(): string {
+    if (!m.best) return "";
+    const lines = [
+      `我的 AI coding 账单折起来是 ${fmtCNY(m.budget)}，`,
+      `刚好够买一台 ${m.best.name}。`,
+      "",
+      `${tokens(stats.totalTokens)} token · ${fmtInt(stats.requests)} 次请求 · ${stats.models} 个模型 · ${stats.activeDays} 天`,
+      "",
+      "用 TokenLedger 统计的——读本机日志，不联网、不上传：",
+      "github.com/Daidai-star/tokenledger",
+    ];
+    return lines.join("\n");
+  }
+
+  async function copyText() {
+    const t = shareText();
+    if (!t) return;
+    try {
+      await navigator.clipboard.writeText(t);
+    } catch {
+      // 非安全上下文（http 局域网调试）下 clipboard 不可用，退回选中提示
+      const ta = document.createElement("textarea");
+      ta.value = t;
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      try {
+        document.execCommand("copy");
+      } finally {
+        document.body.removeChild(ta);
+      }
+    }
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1800);
   }
 
   return (
@@ -78,6 +121,13 @@ export function MallSection({ costUsd, stats }: Props) {
             </div>
             <button className="btn mall-share" onClick={share} title="生成 PNG 保存到本地">
               分享这张账
+            </button>
+            <button
+              className="btn mall-share"
+              onClick={copyText}
+              title="复制配文，发 X / 朋友圈时直接粘贴"
+            >
+              {copied ? "已复制" : "复制配文"}
             </button>
           </div>
         )}
