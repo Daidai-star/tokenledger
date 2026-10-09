@@ -62,12 +62,59 @@ function nodeArchive(version, platform, arch) {
   return `node-v${version}-${os_}-${arch}.tar.gz`;
 }
 
-function download(url, dest) {
+/**
+ * 下载 Node 发行包。
+ *
+ * 用 Node 内置 fetch 而不是 curl：curl 在 macOS/Linux 上都有，
+ * Windows 10 1803+ 也自带，但版本与可用性依赖镜像环境；
+ * fetch 走的是 Node 自己的网络栈，三个平台行为一致。
+ * 顺带在本地也不会因为缺 curl 而失败。
+ */
+async function download(url, dest) {
   fs.mkdirSync(path.dirname(dest), { recursive: true });
   if (fs.existsSync(dest)) return dest;
   console.log(`  下载 ${url}`);
-  execFileSync("curl", ["-fsSL", "--retry", "3", "-o", dest, url], { stdio: ["ignore", "ignore", "inherit"] });
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const res = await fetch(url, { redirect: "follow" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      fs.writeFileSync(dest, Buffer.from(await res.arrayBuffer()));
+      return dest;
+    } catch (err) {
+      if (attempt === 3) {
+        console.error(`下载失败（重试 3 次仍不成功）：${url}`);
+        throw err;
+      }
+      console.warn(`  第 ${attempt} 次失败：${err.message}，重试…`);
+      await new Promise((r) => setTimeout(r, 1000 * attempt));
+    }
+  }
   return dest;
+}
+
+/**
+ * 解压到 stage。
+ *
+ * Windows 分支必须用 PowerShell 的 Expand-Archive：`unzip` 在 Windows 上
+ * 并不存在（curl 和 tar 有，unzip 没有），写成 execFileSync("unzip", ...)
+ * 会在 Windows 构建时 ENOENT —— 本地是 macOS 测不出来，只有 CI 能发现。
+ */
+function extract(archive, stage, isWin) {
+  if (isWin) {
+    execFileSync(
+      "powershell",
+      [
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        `Expand-Archive -LiteralPath '${archive}' -DestinationPath '${stage}' -Force`,
+      ],
+      { stdio: ["ignore", "ignore", "inherit"] },
+    );
+    return;
+  }
+  // .tar.gz 用 tar；若是 .zip 也交给 tar（bsdtar 支持）
+  execFileSync("tar", ["-xf", archive, "-C", stage], { stdio: ["ignore", "ignore", "inherit"] });
 }
 
 async function main() {
@@ -87,27 +134,33 @@ async function main() {
   console.log(`✓ ui/ (${countFiles(path.join(OUT, "ui"))} 个文件)`);
 
   // ---- 2. 后端打成单文件 ----
-  const esbuild = path.join(ROOT, "node_modules", ".bin", "esbuild");
-  if (!fs.existsSync(esbuild)) {
-    console.error("缺少 esbuild，请先 npm install");
+  // 用 esbuild 的 JS API，而不是 execFileSync 调 node_modules/.bin/esbuild：
+  // .bin 下那个文件在 Windows 上是 shell 脚本，真正可执行的是 esbuild.cmd，
+  // spawnSync 直接找无扩展名的那个会 ENOENT。JS API 由 esbuild 自己解析
+  // 平台对应的二进制，跨平台无差异。
+  const esbuildPath = path.join(ROOT, "server", "index.js");
+  const outFile = path.join(OUT, "server.mjs");
+  try {
+    const esbuild = await import("esbuild");
+    await esbuild.build({
+      entryPoints: [esbuildPath],
+      bundle: true,
+      platform: "node",
+      target: "node22",
+      format: "esm",
+      outfile: outFile,
+      // 内置模块保持外部引用，别让 esbuild 去 polyfill
+      external: ["node:*"],
+      banner: {
+        js: "import{createRequire as __cr}from'node:module';const require=__cr(import.meta.url);",
+      },
+      logLevel: "warning",
+    });
+  } catch (err) {
+    console.error("esbuild 打包失败：", err?.message || err);
     process.exit(1);
   }
-  execFileSync(
-    esbuild,
-    [
-      path.join(ROOT, "server", "index.js"),
-      "--bundle",
-      "--platform=node",
-      "--target=node22",
-      "--format=esm",
-      "--outfile=" + path.join(OUT, "server.mjs"),
-      // 内置模块保持外部引用，别让 esbuild 去 polyfill
-      "--external:node:*",
-      "--banner:js=import{createRequire as __cr}from'node:module';const require=__cr(import.meta.url);",
-    ],
-    { stdio: ["ignore", "ignore", "inherit"] },
-  );
-  const kb = Math.round(fs.statSync(path.join(OUT, "server.mjs")).size / 1024);
+  const kb = Math.round(fs.statSync(outFile).size / 1024);
   console.log(`✓ server.mjs (${kb} KB)`);
 
   // ---- 3. Node 运行时 ----
@@ -121,18 +174,17 @@ async function main() {
   const file = nodeArchive(version, platform, arch).replace(/\.tar\.gz$/, `.${ext}`);
   const url = `https://nodejs.org/dist/v${version}/${file}`;
   const tmp = path.join(os.tmpdir(), `tokenledger-node-${version}-${platform}-${arch}.${ext}`);
-  download(url, tmp);
+  await download(url, tmp);
 
   const stage = fs.mkdtempSync(path.join(os.tmpdir(), "tl-node-"));
   try {
+    extract(tmp, stage, isWin);
     if (isWin) {
-      execFileSync("unzip", ["-q", "-o", tmp, "-d", stage], { stdio: "ignore" });
       const inner = fs
         .readdirSync(stage)
         .find((d) => fs.statSync(path.join(stage, d)).isDirectory());
       fs.copyFileSync(path.join(stage, inner, "node.exe"), path.join(OUT, "runtime", "node.exe"));
     } else {
-      execFileSync("tar", ["-xzf", tmp, "-C", stage], { stdio: "ignore" });
       const inner = fs
         .readdirSync(stage)
         .find((d) => fs.statSync(path.join(stage, d)).isDirectory());
