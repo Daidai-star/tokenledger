@@ -634,8 +634,18 @@ code {
   pointer-events: none;
   z-index: 20;
   min-width: 140px;
+  /* 与 Charts.tsx 的 TIP_MAX_W 一致：位置夹取按这个宽度算半宽 */
+  max-width: 240px;
   animation: pop 0.15s var(--ease) both;
   box-shadow: 0 8px 24px -12px rgba(0, 0, 0, 0.4);
+}
+
+/* tooltip 内的长模型名换行，避免把气泡撑得比容器还宽 */
+.chart-tip .tip-label,
+.chart-tip .tip-value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .tip-title {
@@ -1402,6 +1412,450 @@ code {
   font-style: normal;
   font-size: 9.5px;
   color: var(--ink-4);
+}
+
+/* ---------------------------------------------------------- 购买力 */
+
+.mall-empty {
+  padding: 40px 26px;
+  border: 1px dashed var(--line);
+  border-radius: var(--radius-md);
+  text-align: center;
+  color: var(--ink-3);
+  font-size: 13px;
+}
+
+/* 头部：右上角「已经能拿下」 */
+
+.mall-head-right {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+
+.mall-share {
+  white-space: nowrap;
+}
+
+.mall-best {
+  text-align: right;
+  line-height: 1.4;
+}
+
+.mall-best-k {
+  display: block;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+.mall-best-v {
+  font-family: var(--font-serif);
+  font-size: 16px;
+  color: var(--accent);
+}
+
+/* 顶部大字 */
+
+.mall-hero {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 32px;
+  flex-wrap: wrap;
+  padding-bottom: 26px;
+  margin-bottom: 30px;
+  border-bottom: 1px solid var(--line);
+}
+
+.mall-hero .k {
+  font-size: 11px;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  margin-bottom: 8px;
+}
+
+.mall-hero .v {
+  font-family: var(--font-serif);
+  font-size: 52px;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+}
+
+.mall-hero .v.small {
+  font-size: 24px;
+  color: var(--ink-2);
+}
+
+.mall-hero .s {
+  margin-top: 10px;
+  font-family: var(--font-serif);
+  font-size: 15px;
+  color: var(--ink-2);
+}
+
+.mall-hero-side {
+  display: flex;
+  gap: 40px;
+  text-align: right;
+}
+
+/* 对数标尺 */
+
+.mall-rail {
+  margin-bottom: 30px;
+}
+
+.rail-track {
+  position: relative;
+  height: 34px;
+  margin: 0 8px;
+}
+
+.rail-track::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 21px;
+  height: 1px;
+  background: var(--line-strong);
+}
+
+.rail-fill {
+  position: absolute;
+  left: 0;
+  top: 21px;
+  height: 1px;
+  background: var(--accent);
+  transition: width 0.7s var(--ease);
+}
+
+.rail-tick {
+  position: absolute;
+  top: 15px;
+  width: 5px;
+  height: 5px;
+  margin-left: -2.5px;
+  border-radius: 50%;
+  background: var(--ink-4);
+}
+
+.rail-tick.on {
+  background: var(--accent);
+}
+
+.rail-you {
+  position: absolute;
+  top: 4px;
+  width: 0;
+  height: 0;
+  transform: translateX(-50%);
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 7px solid var(--accent);
+}
+
+.rail-you span {
+  position: absolute;
+  left: 50%;
+  bottom: 12px;
+  transform: translateX(-50%);
+  font-size: 11px;
+  color: var(--accent);
+  white-space: nowrap;
+}
+
+/* 贴边时把标签改成靠边对齐，否则一半会跑到容器外 */
+.rail-you.start span {
+  left: 0;
+  transform: none;
+}
+
+.rail-you.end span {
+  left: auto;
+  right: 0;
+  transform: none;
+}
+
+.rail-legend {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--ink-3);
+}
+
+.rail-legend .mid {
+  font-family: var(--font-serif);
+  font-size: 13px;
+  color: var(--accent);
+}
+
+/* 下一个目标 */
+
+.mall-goal {
+  display: flex;
+  gap: 18px;
+  align-items: flex-start;
+  padding: 18px 22px;
+  margin-bottom: 30px;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-line);
+  border-radius: var(--radius-md);
+  animation: fade-up 0.6s var(--ease) both;
+}
+
+.goal-emoji {
+  font-size: 26px;
+  line-height: 1.2;
+}
+
+.goal-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.goal-title {
+  font-family: var(--font-serif);
+  font-size: 17px;
+  color: var(--ink);
+  margin-bottom: 10px;
+}
+
+.goal-title b {
+  color: var(--accent);
+  font-weight: 500;
+}
+
+.goal-track {
+  height: 3px;
+  background: rgba(255, 255, 255, 0.7);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.goal-fill {
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.8s var(--ease);
+}
+
+.goal-sub {
+  margin-top: 9px;
+  font-size: 12px;
+  color: var(--ink-3);
+}
+
+/* 购物车小票 */
+
+.mall-cart {
+  padding: 22px 24px 20px;
+  margin-bottom: 34px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+}
+
+.cart-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding-bottom: 14px;
+  margin-bottom: 14px;
+  border-bottom: 1px dashed var(--line-strong);
+}
+
+.cart-head h3 {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--ink);
+}
+
+.cart-total {
+  font-family: var(--font-serif);
+  font-size: 20px;
+  color: var(--accent);
+}
+
+.cart-line {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 5px 0;
+  font-size: 13px;
+}
+
+.cl-emoji {
+  flex-shrink: 0;
+  width: 20px;
+}
+
+.cl-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink-2);
+}
+
+.cl-qty {
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.cl-sum {
+  min-width: 76px;
+  text-align: right;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.cart-summary {
+  margin-top: 14px;
+  padding-top: 13px;
+  border-top: 1px dashed var(--line-strong);
+  font-size: 12.5px;
+  color: var(--ink-3);
+  line-height: 1.7;
+}
+
+/* 商品阶梯 */
+
+.mall-ladder {
+  display: flex;
+  flex-direction: column;
+  gap: 30px;
+}
+
+.mall-band {
+  animation: fade-up 0.6s var(--ease) both;
+}
+
+.band-head {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  padding-bottom: 10px;
+  margin-bottom: 14px;
+  border-bottom: 1px solid var(--line);
+  flex-wrap: wrap;
+}
+
+.band-name {
+  font-family: var(--font-serif);
+  font-size: 15px;
+  color: var(--ink);
+}
+
+.band-hint {
+  font-size: 11.5px;
+  color: var(--ink-4);
+}
+
+.band-range {
+  margin-left: auto;
+  font-size: 11.5px;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.band-items {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 12px;
+}
+
+.mall-item {
+  display: flex;
+  flex-direction: column;
+  padding: 15px 16px 14px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  transition: border-color 0.2s var(--ease), background 0.2s var(--ease);
+}
+
+.mall-item.on {
+  border-color: var(--accent-line);
+  background: linear-gradient(var(--accent-soft), var(--surface) 60%);
+}
+
+.mall-item.on:hover {
+  border-color: var(--accent);
+}
+
+.mall-item.off {
+  background: transparent;
+}
+
+.mall-item.off .mi-emoji,
+.mall-item.off .mi-name {
+  opacity: 0.45;
+}
+
+.mi-emoji {
+  font-size: 21px;
+  line-height: 1;
+  margin-bottom: 10px;
+}
+
+.mi-name {
+  font-size: 13px;
+  color: var(--ink);
+  line-height: 1.4;
+}
+
+.mi-price {
+  margin-top: 6px;
+  font-family: var(--font-serif);
+  font-size: 15px;
+  color: var(--ink-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.mi-get {
+  margin-top: 3px;
+  font-size: 11.5px;
+  color: var(--ink-3);
+}
+
+.mall-item.on .mi-get {
+  color: var(--accent);
+}
+
+.mi-get b {
+  font-weight: 600;
+}
+
+.mi-hint {
+  /* 推到卡片底部，这样同一行里各张卡的分隔线能对齐 */
+  margin-top: auto;
+  padding-top: 10px;
+  border-top: 1px solid var(--line-soft);
+  font-size: 11px;
+  color: var(--ink-4);
+  line-height: 1.5;
+}
+
+.mi-price + .mi-get {
+  margin-bottom: 10px;
+}
+
+.mall-foot {
+  margin-top: 26px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+  font-size: 11.5px;
+  color: var(--ink-4);
+  line-height: 1.7;
 }
 
 /* ---------------------------------------------------------- 采集流程 */

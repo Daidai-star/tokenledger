@@ -36,9 +36,13 @@ import { PricingTable } from "./pricing.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, "..");
+// 桌面端把构建产物打平放在同一个目录，用 TOKENLEDGER_UI 指过来
+const UI_DIR = process.env.TOKENLEDGER_UI || path.join(ROOT, "dist");
 const DATA_DIR = process.env.TOKENLEDGER_DATA || path.join(os.homedir(), ".tokenledger");
 const DB_FILE = path.join(DATA_DIR, "tokenledger.db");
 const PORT = Number(process.env.PORT) || 8787;
+// 只监听回环地址：桌面端与开发时都不该对外暴露
+const HOST = process.env.TOKENLEDGER_HOST || "127.0.0.1";
 
 const store = new Store(DB_FILE);
 const scanner = new Scanner(store);
@@ -211,7 +215,7 @@ const server = http.createServer(async (req, res) => {
 
   // 静态资源（生产构建）
   if (req.method === "GET" && !url.pathname.startsWith("/api/")) {
-    const dist = path.join(ROOT, "dist");
+    const dist = UI_DIR;
     let file = path.join(dist, url.pathname === "/" ? "index.html" : url.pathname);
     if (!file.startsWith(dist) || !fs.existsSync(file)) file = path.join(dist, "index.html");
     if (fs.existsSync(file)) {
@@ -236,8 +240,15 @@ const server = http.createServer(async (req, res) => {
   json(res, 404, { error: "not found", path: url.pathname });
 });
 
-server.listen(PORT, "127.0.0.1", () => {
-  console.log(`[tokenledger] API  http://127.0.0.1:${PORT}`);
+server.listen(PORT, HOST, () => {
+  const addr = server.address();
+  const actualPort = typeof addr === "object" && addr ? addr.port : PORT;
+  // 桌面端在 0 端口启动以自动挑空闲口，再回读实际端口
+  if (process.send) {
+    process.send({ type: "ready", port: actualPort, ui: UI_DIR });
+  }
+  console.log(`[tokenledger] API  http://${HOST}:${actualPort}`);
+  console.log(`[tokenledger] UI   ${UI_DIR}`);
   console.log(`[tokenledger] DB   ${DB_FILE}`);
   // 首次启动且库为空 -> 自动全量扫描
   const { events } = store.dataRange();
@@ -250,7 +261,16 @@ server.listen(PORT, "127.0.0.1", () => {
   }
 });
 
-process.on("SIGINT", () => {
-  store.close();
-  process.exit(0);
-});
+/** 优雅退出：桌面端关窗时会发 SIGTERM，必须保证 SQLite 正常落盘 */
+function shutdown(signal) {
+  console.log(`[tokenledger] 收到 ${signal}，正在退出`);
+  server.close(() => {
+    store.close();
+    process.exit(0);
+  });
+  // 兜底：3 秒内没关干净就强退，避免桌面端等不到进程结束
+  setTimeout(() => process.exit(0), 3000).unref();
+}
+
+process.on("SIGINT", () => shutdown("SIGINT"));
+process.on("SIGTERM", () => shutdown("SIGTERM"));

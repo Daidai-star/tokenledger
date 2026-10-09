@@ -1,0 +1,58 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "TokenLedger",
+  "version": "0.1.0",
+  "identifier": "dev.daidai.tokenledger",
+  "build": {
+    "frontendDist": "../../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "TokenLedger",
+        "width": 1280,
+        "height": 900,
+        "minWidth": 900,
+        "minHeight": 620,
+        "center": true,
+        "resizable": true,
+        "fullscreen": false,
+        "visible": false
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' http://127.0.0.1:* ws://127.0.0.1:*; script-src 'self' 'unsafe-inline'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["dmg", "app", "msi", "nsis"],
+    "icon": ["icons/icon.png", "icons/icon.ico"],
+    "resources": {
+      "resources/sidecar/rt.json": "sidecar/rt.json",
+      "resources/sidecar/server.mjs": "sidecar/server.mjs",
+      "resources/sidecar/ui/index.html": "sidecar/ui/index.html",
+      "resources/sidecar/ui/assets/*": "sidecar/ui/assets/",
+      "resources/sidecar/runtime/*": "sidecar/runtime/"
+    },
+    "category": "DeveloperTool",
+    "shortDescription": "本机 Coding AI 工具的 Token 账本",
+    "longDescription": "统计 Codex / Claude Code / OpenCode / DSH / Gemini CLI 的模型用量、Token 消耗与吞吐速率。只读本机日志，数据不离开这台机器。",
+    "copyright": "",
+    "licenseFile": null,
+    "macOS": {
+      "minimumSystemVersion": "11.0",
+      "dmg": {
+        "appPosition": { "x": 180, "y": 170 },
+        "applicationFolderPosition": { "x": 480, "y": 170 },
+        "windowSize": { "width": 660, "height": 400 }
+      }
+    },
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser",
+        "languages": ["SimpChinese", "English"]
+      }
+    }
+  }
+}

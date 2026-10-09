@@ -15,6 +15,14 @@ export function useInView<T extends HTMLElement>(_threshold = 0) {
 
 // ---------------------------------------------------------------- 趋势面积图
 
+/**
+ * tooltip 用 translateX(-50%) 居中，靠近左右边缘时会有一半溢出面板。
+ * 这里给出「安全半宽」，用于把水平位置夹回容器内。
+ * 必须与 styles.css 里 .chart-tip 的 max-width 保持一致。
+ */
+const TIP_MAX_W = 240;
+const TIP_HALF_W = TIP_MAX_W / 2;
+
 export interface TrendSeries {
   key: string;
   label: string;
@@ -158,7 +166,16 @@ export function TrendChart({
       </svg>
 
       {hi != null && (
-        <div className="chart-tip" style={{ left: `${(x(hi) / W) * 100}%`, top: -6 }}>
+        <div
+          className="chart-tip"
+          style={{
+            // 贴边时把气泡拉回容器内。夹取必须按**像素**而不是百分比：
+            // 百分比留白在小容器上不够（12% of 600px 只有 72px，
+            // 而气泡半宽可达 120px），仍会溢出面板。
+            left: `clamp(${TIP_HALF_W}px, ${(x(hi) / W) * 100}%, calc(100% - ${TIP_HALF_W}px))`,
+            top: -6,
+          }}
+        >
           <div className="tip-title">{labels[hi]}</div>
           {series.map((s) => (
             <div key={s.key} className="tip-row">

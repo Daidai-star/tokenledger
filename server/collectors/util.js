@@ -10,6 +10,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import zlib from "node:zlib";
 
 /** 递归列出目录下匹配后缀的文件（带深度上限，避开巨型目录） */
 export function walkFiles(root, { exts = null, maxDepth = 8, maxFiles = 20000 } = {}) {
@@ -171,6 +172,92 @@ export async function readJsonlIncremental(file, cursor, onLine, opts = {}) {
   }
 
   return { byteOffset: offset, lineNo, size: st.size, mtime: st.mtimeMs, parsed, reset };
+}
+
+/**
+ * 读取 zstd 压缩的 JSONL。
+ *
+ * 为什么需要单独一条路径：Codex 会把较老的会话压成 `.jsonl.zst`（内容与
+ * `.jsonl` 完全一致）。压缩流没法按字节偏移续读，所以每次都整文件流式
+ * 解压，靠「size + mtime 未变则跳过」来避免重复解压。
+ *
+ * 只处理**单帧** zstd——实测 Codex 的 395 个 `.jsonl.zst`（共 1.37GB）
+ * 全部是单帧，内置 zstd 一次即可解完。多帧拼接的格式见 dsh.js。
+ *
+ * 分片解压 + 分片解析，并定期让出事件循环：单文件解压后可到 300MB+，
+ * 不让出的话扫描期间 SSE 的写缓冲会一直攒着，前端看不到进度。
+ *
+ * @param {string} file      文件路径
+ * @param {function} onLine  (obj, lineNo) => void
+ * @param {object} opts      { filter?: fn, yieldBytes?: number }
+ * @returns {Promise<{lineNo, size, mtime, parsed}>}
+ */
+export async function readZstdJsonl(file, onLine, opts = {}) {
+  const YIELD_BYTES = opts.yieldBytes ?? 8 << 20;
+  const st = fs.statSync(file);
+  const breathe = () => new Promise((resolve) => setImmediate(resolve));
+
+  const src = fs.createReadStream(file, { highWaterMark: 1 << 20 });
+  const zst = zlib.createZstdDecompress({ chunkSize: 1 << 20 });
+
+  let carry = null;
+  let lineNo = 0;
+  let parsed = 0;
+  let sinceYield = 0;
+
+  const handle = (line) => {
+    // 空白行跳过
+    for (let i = 0; i < line.length; i++) {
+      const c = line[i];
+      if (c !== 0x20 && c !== 0x09 && c !== 0x0d) {
+        if (!opts.filter || opts.filter(line, 0, line.length)) {
+          try {
+            onLine(JSON.parse(line.toString("utf8")), lineNo);
+            parsed++;
+          } catch {
+            /* 坏行忽略 */
+          }
+        }
+        return;
+      }
+    }
+  };
+
+  try {
+    // pipe 不会把读错误转给目标流，必须自己接，否则 for-await 会永久挂住
+    src.on("error", (err) => zst.destroy(err));
+    src.pipe(zst);
+
+    for await (const chunk of zst) {
+      // 拼上上一块的残留，再切出所有完整行
+      const buf = carry && carry.length ? Buffer.concat([carry, chunk]) : chunk;
+      let start = 0;
+      let idx;
+      while ((idx = buf.indexOf(NL, start)) !== -1) {
+        lineNo++;
+        handle(buf.subarray(start, idx));
+        start = idx + 1;
+      }
+      carry = start ? buf.subarray(start) : buf;
+
+      sinceYield += chunk.length;
+      if (sinceYield >= YIELD_BYTES) {
+        sinceYield = 0;
+        await breathe();
+      }
+    }
+
+    // 末尾没有换行的最后一行
+    if (carry && carry.length) {
+      lineNo++;
+      handle(carry);
+    }
+  } finally {
+    src.destroy();
+    zst.destroy();
+  }
+
+  return { lineNo, size: st.size, mtime: st.mtimeMs, parsed };
 }
 
 /** 解析时间戳 -> epoch ms。支持 ISO 字符串 / 数字（秒或毫秒） */

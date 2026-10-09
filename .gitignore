@@ -3,3 +3,11 @@ dist/
 data/
 .DS_Store
 *.log
+
+# Rust / Tauri 产物：可由 npm run desktop:build 完全重建
+desktop/src-tauri/target/
+desktop/src-tauri/gen/
+
+# 打包给 Tauri 的 sidecar（server.mjs + Node 运行时，约 114MB），
+# 由 npm run build:sidecar 生成，绝不入库
+desktop/src-tauri/resources/sidecar/

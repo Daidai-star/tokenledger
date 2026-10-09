@@ -13,5 +13,8 @@
     "isolatedModules": true,
     "types": ["vite/client"]
   },
-  "include": ["web"]
+  "include": ["web"],
+  // 测试跑在 Node 里（靠内置类型剥离），不需要也不该看到 DOM 环境。
+  // 排除掉才能保持 types 里只有 vite/client，不把 Node 全局漏进浏览器代码。
+  "exclude": ["web/**/*.test.ts"]
 }

@@ -27,18 +27,23 @@
     "build": "vite build",
     "start": "node server/index.js",
     "scan": "node server/cli.js scan",
-    "test": "node --test server/*.test.js server/collectors/*.test.js",
-    "typecheck": "tsc --noEmit"
+    "test": "node --test server/*.test.js server/collectors/*.test.js scripts/*.test.js web/src/*.test.ts",
+    "typecheck": "tsc --noEmit",
+    "build:sidecar": "node scripts/build-sidecar.mjs",
+    "desktop:dev": "npm run build:sidecar && tauri dev",
+    "desktop:build": "npm run build && npm run build:sidecar && tauri build"
   },
   "dependencies": {
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },
   "devDependencies": {
+    "@tauri-apps/cli": "^2.12.1",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.4",
     "concurrently": "^9.1.0",
+    "esbuild": "^0.28.2",
     "typescript": "^5.7.2",
     "vite": "^6.0.5"
   }

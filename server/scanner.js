@@ -100,6 +100,11 @@ export class Scanner extends EventEmitter {
         const sessions = [];
         const roots = Object.fromEntries(collectors.map((x) => [x.id, x.roots[0]]));
 
+        // 游标先攒着，等事件真正落盘后再提交。
+        // 否则进程在中途被杀时会出现「游标已推进、数据还在内存里」的窗口，
+        // 重启后这些文件被当成未变更跳过，事件就永久丢了。
+        let pendingCursors = [];
+
         const ctx = {
           roots,
           cursor: (source, file) => {
@@ -116,13 +121,9 @@ export class Scanner extends EventEmitter {
               reset,
             };
           },
-          advance: (source, file, res) =>
-            this.store.setCursor(source, file, {
-              byteOffset: res.byteOffset,
-              lineNo: res.lineNo,
-              size: res.size,
-              mtime: res.mtime,
-            }),
+          advance: (source, file, res) => {
+            pendingCursors.push({ source, file, res });
+          },
           session: (s) => sessions.push(s),
           emitProgress: (tool, evCount, parsed, total) => {
             const pct = base + (total ? (parsed / total) * span : span);
@@ -142,6 +143,8 @@ export class Scanner extends EventEmitter {
         try {
           result = await c.scan(ctx);
         } catch (err) {
+          // 工具出错：丢弃游标，下次会从头重读（event_id 幂等，不会重复计数）
+          pendingCursors = [];
           emit({ stage: "tool-error", percent: base, tool: c.id, error: String(err?.message || err) });
           continue;
         }
@@ -166,6 +169,11 @@ export class Scanner extends EventEmitter {
           });
           eventsNew += this.store.insertEvents(result.events);
         }
+
+        // 数据已落盘，现在才提交游标
+        this.#commitCursors(pendingCursors);
+        pendingCursors = [];
+
         for (const s of sessions) this.store.upsertSession(s);
       }
 
@@ -192,6 +200,28 @@ export class Scanner extends EventEmitter {
       throw err;
     } finally {
       this.running = false;
+    }
+  }
+
+  /** 批量写入游标。事件落盘之后才调用。 */
+  #commitCursors(list) {
+    for (const { source, file, res } of list) {
+      try {
+        this.store.setCursor(source, file, {
+          byteOffset: res.byteOffset,
+          lineNo: res.lineNo,
+          size: res.size,
+          mtime: res.mtime,
+        });
+      } catch (err) {
+        // 游标写失败只会导致下次重读该文件（幂等），不影响本次数据
+        this.emit("progress", {
+          running: true,
+          stage: "storing",
+          percent: 0,
+          error: `游标写入失败 ${file}: ${String(err?.message || err)}`,
+        });
+      }
     }
   }
 

@@ -10,6 +10,7 @@ import {
   ToolModelMatrix,
   TrendChart,
 } from "./components/Charts";
+import { MallSection } from "./components/Mall";
 import ScanFlow from "./components/ScanFlow";
 import { fetchDashboard, triggerReset, triggerScan } from "./api";
 import type { Dashboard, Range, ScanProgress, ToolMeta, ToolSeriesCell } from "./types";
@@ -612,6 +613,25 @@ export default function App() {
       </section>
 
       <RateSection data={data} />
+
+      <MallSection
+        costUsd={o.cost_usd}
+        stats={{
+          totalTokens: o.total_tokens,
+          requests: o.requests,
+          models: data.byModel.length,
+          activeDays: data.profile.activeDays.length,
+          span:
+            data.profile.activeDays.length > 0
+              ? `${data.profile.activeDays[0].day} → ${data.profile.activeDays[data.profile.activeDays.length - 1].day}`
+              : "",
+          tools: data.byTool.map((t) => ({
+            name: toolName(t.tool),
+            tokens: t.total_tokens,
+            color: toolColor(t.tool),
+          })),
+        }}
+      />
 
       <section className="section">
         <div className="section-head">

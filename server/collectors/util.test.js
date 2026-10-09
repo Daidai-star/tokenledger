@@ -11,6 +11,7 @@ import zlib from "node:zlib";
 import {
   walkFiles,
   readJsonlIncremental,
+  readZstdJsonl,
   bytesFilter,
   toTs,
   hashId,
@@ -263,4 +264,83 @@ test("内置 zstd 单帧解压可用", async () => {
   const packed = zlib.zstdCompressSync(raw);
   const out = zlib.zstdDecompressSync(packed);
   assert.equal(out.toString("utf8").split("\n").filter(Boolean).length, 500);
+});
+
+// ------------------------------------------------------- zstd JSONL 读取
+
+function zstFile(lines) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "tl-zst-"));
+  const f = path.join(dir, "a.jsonl.zst");
+  fs.writeFileSync(f, zlib.zstdCompressSync(Buffer.from(lines, "utf8")));
+  return { f, dir };
+}
+
+test("readZstdJsonl 逐行还原压缩内容", async () => {
+  const lines = Array.from({ length: 2000 }, (_, i) => JSON.stringify({ i, kind: "x" })).join("\n");
+  const { f, dir } = zstFile(lines);
+  const got = [];
+  const res = await readZstdJsonl(f, (o) => got.push(o.i));
+  assert.equal(got.length, 2000);
+  assert.equal(got[0], 0);
+  assert.equal(got[1999], 1999);
+  assert.equal(res.size, fs.statSync(f).size);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("readZstdJsonl 行号连续，且能处理末尾无换行的最后一行", async () => {
+  // 最后一行故意不带换行——zstd 流的尾块容易在这里丢内容
+  const body = Array.from({ length: 50 }, (_, i) => JSON.stringify({ i })).join("\n");
+  const { f, dir } = zstFile(body + "\n" + JSON.stringify({ i: 50 }));
+  const seen = [];
+  const res = await readZstdJsonl(f, (o, lineNo) => seen.push([lineNo, o.i]));
+  assert.equal(seen.length, 51);
+  // 行号与 readJsonlIncremental 一致：1-based
+  assert.equal(seen[0][0], 1);
+  assert.equal(seen[50][0], 51, "行号应连续到最后一行");
+  assert.equal(seen[50][1], 50, "末尾无换行的最后一行不能丢");
+  assert.equal(res.lineNo, 51);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("readZstdJsonl 跨解压块边界的行不被截断", async () => {
+  // 每行 ~2KB，总量远超 1MB 的 chunkSize，强制行跨越多次块边界
+  const rows = Array.from({ length: 1500 }, (_, i) =>
+    JSON.stringify({ i, pad: "x".repeat(2000) }),
+  ).join("\n");
+  const { f, dir } = zstFile(rows);
+  const got = [];
+  await readZstdJsonl(f, (o) => {
+    // 行若被截断，JSON.parse 会失败并被吞掉，这里长度对不上
+    got.push(o.pad.length);
+  });
+  assert.equal(got.length, 1500);
+  assert.ok(got.every((n) => n === 2000));
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("readZstdJsonl 支持字节级 filter 跳过无关行", async () => {
+  const rows = [
+    JSON.stringify({ type: "session_meta", cwd: "/x" }),
+    JSON.stringify({ type: "message", body: "正文".repeat(500) }),
+    JSON.stringify({ type: "event_msg", payload: { type: "token_count" } }),
+    "",
+    "   ",
+    JSON.stringify({ type: "event_msg", payload: { type: "token_count" } }),
+  ].join("\n");
+  const { f, dir } = zstFile(rows);
+  const filter = bytesFilter(['"token_count"', '"session_meta"']);
+  const got = [];
+  const res = await readZstdJsonl(f, (o) => got.push(o.type), { filter });
+  assert.deepEqual(got, ["session_meta", "event_msg", "event_msg"]);
+  // 空白行不计入 parsed
+  assert.equal(res.parsed, 3);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("readZstdJsonl 对损坏文件抛错而不是静默返回空", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "tl-zst-bad-"));
+  const f = path.join(dir, "bad.jsonl.zst");
+  fs.writeFileSync(f, Buffer.from("这不是 zstd 数据", "utf8"));
+  await assert.rejects(() => readZstdJsonl(f, () => {}));
+  fs.rmSync(dir, { recursive: true, force: true });
 });
