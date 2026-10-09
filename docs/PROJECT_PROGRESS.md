@@ -23,6 +23,7 @@ v0.1.0 已发布并修好首次 Release 的构建问题。项目账单与缓存�
 | 类型 | `npm run typecheck` | 通过 |
 | 前端构建 | `npm run build` | 通过，199.58 kB（gzip 64.01 kB） |
 | 接口 | `node server/index.js` + curl | `/api/projects`、`/api/cold-start` 均返回真实数据 |
+| 浏览器渲染 | Playwright 1440px + 390px | 两个新区块渲染正常，窄屏溢出已清零 |
 
 ## 已完成工作
 
@@ -93,6 +94,22 @@ Claude 缓存读相对 input 的折扣比例。这是估算，不是厂商账单
 Rust 侧只做四件事：挑空闲端口、拉起打包的 Node、轮询 `/api/health`、开 WebView。
 健康检查用 `std::net` 直发 HTTP，不引入 `reqwest`。实测 DMG 37.9 MB vs Electron ~85 MB。
 
+**窄屏溢出是 grid 子项的 min-content 撑开，不是断点没写对**（10-09 实测）。
+390px 下整页宽 540px，查出三处根因，媒体查询里改了三个地方才清零：
+
+1. `@media (max-width: 900px)` 把 `.grid-2` 改成了单列，但子项仍按
+   `min-content` 撑到 520px。补 `.grid-2 > * { min-width: 0 }`。
+   注意只加一层不够——嵌套的 `.rank-list` 也要单独给 `min-width: 0`。
+2. `.rank-row` 的固定列宽合计 476px（140+56+80+70+60 + 4×14 gap），
+   窄屏放不下。媒体查询里压到 44+56+52 + 8px gap，并把 `minmax()`
+   的下限从 `140px/80px` 改成 `0`（只写 `1fr` 的话下限还是 auto）。
+3. `.table` 是 5 列 nowrap 的表格，min-content 438px。它没有滚动容器，
+   整页被撑宽。给明细表包一层 `.table-scroll { overflow-x: auto }`，
+   表格内部横向滚动，页面不动。宽屏下容器 530px 正好装下，不触发滚动。
+
+复现方式：`page.setViewportSize({width:390,height:844})` 后比较
+`document.documentElement.scrollWidth` 与 `innerWidth`。相等即无横向溢出。
+
 **不做排行榜。**
 coding agent 日志敏感度远高于普通使用统计，上传时间序列足以反推作息。
 如果以后要加，保持纯本地，最多做成与历史快照的对比。
@@ -136,14 +153,13 @@ npm run typecheck
 - **项目数会随扫描范围增长**。界面上限前 10 + 前 12 明细，超出部分只给计数。
 - **发布流水线在 10-09 刚修完六个问题**（Node 归档路径、Windows sidecar 兼容、
   产物路径、CRLF 正则、Windows 包静默漏发）。首次发布踩坑多，后续改动需谨慎验证。
-- **浏览器端未做可视化验证**。本次改动只做了构建产物检查（确认新文案与
-  `.proj-path` 样式进了 bundle），实际渲染效果待人工确认。
+- **窄屏横向溢出已修**（10-09 浏览器实测）。390px 下原为 540px 溢出，
+  根因有三处，见下方决策记录。
 
 ## 接下来的优先级
 
-1. 人工在浏览器里确认两个新区块的渲染与窄屏表现
-2. 用户还有后续需求，待明确后再排
-3. 发布策略由用户决定，本轮明确不做 release
+1. 用户还有后续需求，待明确后再排
+2. 发布策略由用户决定，本轮明确不做 release
 
 ## 更新规则
 

@@ -1151,6 +1151,13 @@ code {
   font-size: 12.5px;
 }
 
+/* 表格列多且不换行，窄屏下让表内横向滚动，别把整页撑宽 */
+.table-scroll {
+  overflow-x: auto;
+  margin-inline: -4px;
+  padding-inline: 4px;
+}
+
 .table th {
   text-align: right;
   color: var(--ink-3);
@@ -2271,6 +2278,14 @@ code {
   .profile-fact { padding-right: 12px; }
   .profile-tools { justify-content: center; }
   .grid-2 { grid-template-columns: 1fr; gap: 28px; }
+  /* 单列后子项仍按 min-content 撑开（明细表 520px），必须允许收缩 */
+  .grid-2 > * { min-width: 0; }
+  /* 排行行固定列宽合计 476px，窄屏放不下会导致整页横向溢出 */
+  .rank-row {
+    grid-template-columns: minmax(0, 1.7fr) 44px minmax(0, 1fr) 56px 52px;
+    gap: 8px;
+  }
+  .rank-list { min-width: 0; }
   .stat-row { grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); }
   .event {
     grid-template-columns: 48px 1fr 68px 66px;

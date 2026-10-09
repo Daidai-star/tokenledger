@@ -4,6 +4,9 @@ data/
 .DS_Store
 *.log
 
+# Playwright 自动化产生的快照与截图，纯调试产物
+.playwright-cli/
+
 # Rust / Tauri 产物：可由 npm run desktop:build 完全重建
 desktop/src-tauri/target/
 desktop/src-tauri/gen/

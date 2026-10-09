@@ -104,32 +104,34 @@ export function ProjectSection({ rows }: { rows: ProjectRow[] }) {
             <h2 style={{ fontSize: 16 }}>明细</h2>
             <span className="sub">缓存命中率差异 = 上下文复用策略的差异</span>
           </div>
-          <table className="table">
-            <thead>
-              <tr>
-                <th>项目</th>
-                <th>请求</th>
-                <th>Token</th>
-                <th>命中</th>
-                <th>成本</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.slice(0, 12).map((r) => (
-                <tr key={r.cwd}>
-                  <td>
-                    <span className="proj-path" title={r.cwd}>
-                      {shortPath(r.cwd)}
-                    </span>
-                  </td>
-                  <td>{fmtInt(r.requests)}</td>
-                  <td>{tokens(r.total_tokens)}</td>
-                  <td>{r.cache_hit_rate.toFixed(1)}%</td>
-                  <td>{r.cost_usd > 0 ? fmtCost(r.cost_usd) : "—"}</td>
+          <div className="table-scroll">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>项目</th>
+                  <th>请求</th>
+                  <th>Token</th>
+                  <th>命中</th>
+                  <th>成本</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {rows.slice(0, 12).map((r) => (
+                  <tr key={r.cwd}>
+                    <td>
+                      <span className="proj-path" title={r.cwd}>
+                        {shortPath(r.cwd)}
+                      </span>
+                    </td>
+                    <td>{fmtInt(r.requests)}</td>
+                    <td>{tokens(r.total_tokens)}</td>
+                    <td>{r.cache_hit_rate.toFixed(1)}%</td>
+                    <td>{r.cost_usd > 0 ? fmtCost(r.cost_usd) : "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
           {rows.length > 12 && (
             <div className="peak-note">另有 {fmtInt(rows.length - 12)} 个项目未列出。</div>
           )}
