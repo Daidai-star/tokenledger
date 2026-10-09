@@ -15,7 +15,18 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-const src = fs.readFileSync(new URL("./build-sidecar.mjs", import.meta.url), "utf8");
+/**
+ * 行尾必须先归一化：Windows runner 上 actions/checkout 会把 LF 转成 CRLF，
+ * 直接按 `\n` 匹配正则会全部落空（v0.1.0 的 Windows 构建就是这么挂的）。
+ */
+function readScript() {
+  return fs
+    .readFileSync(new URL("./build-sidecar.mjs", import.meta.url), "utf8")
+    .replace(/\r\n/g, "\n");
+}
+const src = readScript();
+/** 同一份源码但用 CRLF 行尾，用来验证上面的归一化确实必要且有效 */
+const srcCRLF = readScript().replace(/\n/g, "\r\n");
 
 /**
  * 抽出脚本里的解析器，避免真的去下载 Node 运行时。
@@ -95,8 +106,12 @@ test("多组参数共存", () => {
  *  - Unix:    node-v24.13.1-darwin-arm64/bin/node（多一层 bin）
  * 另外塞几个干扰项（node_modules、嵌套同名文件）确保优先级正确。
  */
-function loadFinder() {
-  const m = src.match(/function findNodeBinary[\s\S]*?\n  return hits\.length \? hits\[0\]\.abs : null;\n}/);
+function loadFinder(source = src) {
+  // 归一化必须在 loader 内部做，放调用方会被 CRLF 源码绕过去
+  const norm = source.replace(/\r\n/g, "\n");
+  const m = norm.match(
+    /function findNodeBinary[\s\S]*?\n {2}return hits\.length \? hits\[0\]\.abs : null;\n\}/,
+  );
   assert.ok(m, "没找到 findNodeBinary，脚本结构可能变了");
   return eval(`(${m[0]})`);
 }
@@ -162,4 +177,28 @@ test("平台不匹配时返回 null（不会把 macOS 的 node 打进 Windows �
 test("目录不存在时返回 null 而不是抛错", () => {
   assert.equal(findNodeBinary("/nonexistent/tl/xyz", false), null);
   assert.equal(findNodeBinary("/nonexistent/tl/xyz", true), null);
+});
+
+test("源码是 CRLF 行尾时也能正常解析（Windows runner 会转换行尾）", () => {
+  // loader 内部若不做归一化，正则里的 \n 在 \r\n 里就匹配不上
+  const find = loadFinder(srcCRLF);
+  const dir = makeTree(WIN_TREE);
+  const hit = norm(find(dir, true));
+  assert.match(hit, /win-x64\/node\.exe$/);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("参数解析同样不受行尾影响", () => {
+  const norm = srcCRLF.replace(/\r\n/g, "\n");
+  const m = norm.match(/const args = \(\(\) => \{[\s\S]*?\n\}\)\(\);/);
+  assert.ok(m, "CRLF 源码里找不到参数解析器");
+  const fnSrc = m[0].slice("const args = ".length).replace(/\(\)\s*;?\s*$/, "");
+  const parse = eval(fnSrc);
+  const saved = process.argv;
+  process.argv = ["node", "build-sidecar.mjs", "--arch=x64"];
+  try {
+    assert.equal(parse().get("arch"), "x64");
+  } finally {
+    process.argv = saved;
+  }
 });
