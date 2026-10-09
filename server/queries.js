@@ -401,6 +401,135 @@ export class Queries {
     };
   }
 
+  /**
+   * 浪费诊断：把冷启动从「统计」变成「可执行的建议」。
+   *
+   * coldStart 回答「缓存爬升有多快」，但没说「所以呢」。
+   * 这里回答三个问题：
+   *   1. 切碎了吗   —— 碎片化指数 = 会话数 / 唯一项目数
+   *   2. 多花了多少 —— 每个项目的首轮学费合计
+   *   3. 怎么改     —— advice 数组，给具体到能照着做的建议
+   *
+   * 口径决定（与 coldStart 严格一致，改一处必须改两处）：
+   *  - 「首轮」用 ROW_NUMBER 而不是 MIN(ts)，原因见 coldStart 的注释：
+   *    并发请求共享同一毫秒，用 MIN(ts) JOIN 会重复计数 2.4 倍。
+   *  - 排除 total_tokens = 0 的心跳行，它们不带用量。
+   *  - 排除 cwd 为空的事件——项目维度没有它们的位置。
+   *  - 费用优先用日志自带的 cost_usd（reported），没有才按 token 估。
+   *
+   * 为什么用「会话数 / 项目数」衡量碎片化，而不是平均会话长度：
+   * 平均长度对长尾会话过度敏感（一次 200 轮的长会话会把均值拉高，
+   * 掩盖掉「同时开了 5 个短会话」这种真实的浪费）。
+   */
+  waste(q = {}) {
+    const w = this.#eventWhere(q);
+
+    // 每个会话的首轮（rn=1），带上项目归属
+    const firsts = this.store
+      .prep(
+        `WITH ranked AS (
+           SELECT cwd, session_id, input_tokens, cache_read_tokens,
+                  total_tokens, cost_usd, cost_source,
+                  ROW_NUMBER() OVER (PARTITION BY session_id ORDER BY ts, rowid) AS rn
+           FROM usage_events
+           WHERE ${w.sql ? `(${w.sql}) AND` : ""} session_id IS NOT NULL
+             AND session_id <> '' AND cwd IS NOT NULL AND cwd <> ''
+             AND total_tokens > 0
+         )
+         SELECT cwd,
+                session_id,
+                input_tokens,
+                cache_read_tokens,
+                total_tokens,
+                cost_usd,
+                cost_source
+         FROM ranked
+         WHERE rn = 1`,
+      )
+      .all(...w.params);
+
+    // 项目总量，用于算「首轮占项目成本多少」
+    const totals = this.store
+      .prep(
+        `SELECT cwd,
+                COUNT(DISTINCT session_id) AS sessions,
+                SUM(total_tokens) AS total_tokens,
+                SUM(COALESCE(cost_usd, 0)) AS cost_usd
+         FROM usage_events
+         WHERE ${w.sql ? `(${w.sql}) AND` : ""} cwd IS NOT NULL AND cwd <> ''
+         GROUP BY cwd`,
+      )
+      .all(...w.params);
+
+    const byCwd = new Map(totals.map((t) => [t.cwd, t]));
+    const perProject = new Map();
+
+    for (const f of firsts) {
+      let p = perProject.get(f.cwd);
+      if (!p) {
+        const t = byCwd.get(f.cwd);
+        p = {
+          cwd: f.cwd,
+          sessions: t ? t.sessions : 0,
+          total_tokens: t ? t.total_tokens : 0,
+          total_cost_usd: round(t ? t.cost_usd : 0),
+          first_input_tokens: 0,
+          first_cost_usd: 0,
+          hasReportedCost: false,
+        };
+        perProject.set(f.cwd, p);
+      }
+      p.first_input_tokens += f.input_tokens;
+      p.first_cost_usd += f.cost_usd == null ? 0 : f.cost_usd;
+      if (f.cost_source === "reported") p.hasReportedCost = true;
+    }
+
+    const CACHE_DISCOUNT = 5.75;
+
+    const rows = [...perProject.values()]
+      .map((p) => {
+        // 首轮学费：这部分新鲜输入本可以按缓存价计费
+        const wasteUsd = round(Math.max(0, p.first_cost_usd * (1 - 1 / CACHE_DISCOUNT)));
+        return {
+          cwd: p.cwd,
+          sessions: p.sessions,
+          total_tokens: p.total_tokens,
+          cost_usd: p.total_cost_usd,
+          first_input_tokens: p.first_input_tokens,
+          first_cost_usd: round(p.first_cost_usd),
+          /** 首轮学费占项目总成本的比例（%） */
+          waste_share: p.total_cost_usd > 0
+            ? round((wasteUsd / p.total_cost_usd) * 100, 1)
+            : 0,
+          waste_usd: wasteUsd,
+          /** 该项目平均每个会话多少轮——碎片化的直观体现 */
+          requests_per_session: p.sessions > 0
+            ? round(p.total_tokens / p.sessions)
+            : 0,
+          cost_source_estimated: !p.hasReportedCost,
+        };
+      })
+      // 按可省金额降序：最值得先改的排最前
+      .sort((a, b) => b.waste_usd - a.waste_usd);
+
+    const projects = rows.length;
+    const sessions = rows.reduce((n, r) => n + r.sessions, 0);
+    const fragmentation = projects > 0 ? round(sessions / projects, 2) : 0;
+    const totalWasteUsd = round(rows.reduce((n, r) => n + r.waste_usd, 0));
+
+    return {
+      projects,
+      sessions,
+      /** 平均每个项目开了多少个会话。1 = 不碎，越大越碎 */
+      fragmentation,
+      total_waste_usd: totalWasteUsd,
+      rows,
+      discount: CACHE_DISCOUNT,
+      verdict: verdictFor(fragmentation),
+      advice: adviceFor({ fragmentation, rows, totalWasteUsd }),
+    };
+  }
+
   /** 星期分布（0=周日） */
   weekday(q = {}) {
     const w = this.#eventWhere(q);
@@ -715,6 +844,26 @@ function round(n) {
   return Math.round(v * 10000) / 10000;
 }
 
+/** 指定小数位的四舍五入（给文案用，避免把 9.5333 直接印给人看） */
+function roundTo(n, digits) {
+  const v = Number(n);
+  if (!Number.isFinite(v)) return 0;
+  const f = 10 ** digits;
+  return Math.round(v * f) / f;
+}
+
+/**
+ * cwd 只保留最后两段，和前端 `shortPath` 保持一致。
+ * cwd 里就是项目名，可能含客户名或内部代号——
+ * 拼进建议文本就等于把它带出了本机。
+ */
+function shortPath(p) {
+  if (!p) return "—";
+  const parts = p.split("/").filter(Boolean);
+  if (parts.length <= 2) return p;
+  return "…/" + parts.slice(-2).join("/");
+}
+
 function toDayStr(d) {
   return d.toISOString().slice(0, 10);
 }
@@ -750,4 +899,77 @@ function longestStreak(activeSet) {
     prev = day;
   }
   return best;
+}
+
+/**
+ * 碎片化指数 → 结论等级。
+ *
+ * 阈值不是拍的：1.0–1.5 属于正常（同一项目偶尔重开会话很正常），
+ * 2.0 以上说明习惯性重开，到 3.0 基本是「每次提问都新开会话」。
+ */
+function verdictFor(fragmentation) {
+  if (!(fragmentation > 1)) return "ok";
+  if (fragmentation < 1.5) return "ok";
+  if (fragmentation < 2) return "mild";
+  if (fragmentation < 3) return "moderate";
+  return "severe";
+}
+
+/**
+ * 把统计翻译成能照着做的建议。
+ *
+ * 每条建议必须说清做什么（action）、依据哪个数字（why）、
+ * 预计省多少（save，可为 null 表示取决于用法）。
+ * 不写「优化缓存」这种没法执行的话——用户要的是「把同一份上下文
+ * 留在一个会话里继续用」这种具体到动作的句子。
+ */
+function adviceFor({ fragmentation, rows, totalWasteUsd }) {
+  const out = [];
+  const top = rows[0];
+
+  if (fragmentation > 1.5) {
+    out.push({
+      kind: "fragmentation",
+      severity: verdictFor(fragmentation),
+      action: "把同一份上下文留在同一个会话里继续用，别每次提问都新开会话",
+      why: `平均每个项目开了 ${roundTo(fragmentation, 1)} 个会话。每个新会话的第一枪没有缓存可读，只能按 input 全价计费——这是纯粹的学费。`,
+      save: totalWasteUsd > 0 ? totalWasteUsd : null,
+    });
+  }
+
+  if (top && top.waste_usd > 0) {
+    out.push({
+      kind: "project",
+      severity: top.waste_share >= 5 ? "severe" : top.waste_share >= 2 ? "moderate" : "mild",
+      // 只用最后两段，和前端 shortPath 一致——cwd 里就是项目名，
+      // 可能是客户名或内部代号，绝不能整段出现在建议文本里。
+      action: `优先改 ${shortPath(top.cwd)}：它占了最多学费`,
+      why: `这个项目的首轮学费合计 $${roundTo(top.waste_usd, 2)}，是全部项目里最高的——它有 ${top.sessions} 个会话，每次开工都要重新喂一遍上下文。`,
+      save: top.waste_usd,
+    });
+  }
+
+  // 首轮占比很高说明上下文在反复重建，不只是会话数多
+  const heavy = rows.find((r) => r.first_input_tokens > 0 && r.waste_share >= 20);
+  if (heavy) {
+    out.push({
+      kind: "context",
+      severity: "moderate",
+      action: `看看 ${shortPath(heavy.cwd)} 每次开工在读什么：是不是每次都要重新读一遍大文件？`,
+      why: `${shortPath(heavy.cwd)} 的首轮新鲜输入有 ${heavy.first_input_tokens.toLocaleString("en-US")} token，占该项目成本的 ${roundTo(heavy.waste_share, 1)}%——如果这些内容本来就在缓存里，本不该重复付费。`,
+      save: heavy.waste_usd,
+    });
+  }
+
+  if (out.length === 0) {
+    out.push({
+      kind: "ok",
+      severity: "ok",
+      action: "保持现在的习惯",
+      why: "项目与会话基本一一对应，冷启动学费已经压到很低了。",
+      save: 0,
+    });
+  }
+
+  return out;
 }

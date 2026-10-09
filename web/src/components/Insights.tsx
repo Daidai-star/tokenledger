@@ -1,6 +1,6 @@
 import { RankBars, TrendChart } from "./Charts";
 import { fmtCost, fmtInt, shortPath, tokens } from "../format";
-import type { ColdStartData, ProjectRow } from "../types";
+import type { ColdStartData, ProjectRow, WasteData } from "../types";
 
 /**
  * 项目账单：钱花在哪个项目上。
@@ -137,6 +137,152 @@ export function ProjectSection({ rows }: { rows: ProjectRow[] }) {
           )}
         </div>
       </div>
+    </section>
+  );
+}
+
+/**
+ * 浪费诊断：把「缓存爬升多快」变成「你多花了多少、怎么改」。
+ *
+ * 前两块区块是描述——项目账单告诉你钱在哪，冷启动告诉你命中率怎么爬。
+ * 但用户真正要的是下一步动作。codeburn 那套 `optimize` 的价值就在这里：
+ * 不给「命中率 52%」，给「这个项目每次开工都重新喂上下文，每月多烧 $3」。
+ *
+ * 这里的每个建议都带三件事：做什么（action）、依据哪个数字（why）、
+ * 能省多少（save）。没有依据的数字不写进建议——那是猜。
+ *
+ * 隐私：同 ProjectSection，cwd 只显示最后两段，不进分享路径。
+ */
+export function WasteSection({ data }: { data: WasteData }) {
+  if (!data.projects) {
+    return (
+      <section className="section">
+        <div className="section-head">
+          <h2>浪费诊断</h2>
+          <span className="sub">会话切碎是缓存账单的主要来源</span>
+        </div>
+        <div className="panel">
+          <div className="empty-hint">没有带工作目录的用量记录，无法判断会话碎片</div>
+        </div>
+      </section>
+    );
+  }
+
+  const sevLabel: Record<WasteData["verdict"], string> = {
+    ok: "良好",
+    mild: "轻微",
+    moderate: "中度",
+    severe: "明显",
+  };
+
+  return (
+    <section className="section waste">
+      <div className="section-head">
+        <div>
+          <h2>浪费诊断</h2>
+          <div className="sub">
+            会话切碎是缓存账单的主要来源 · 按缓存读 1/{data.discount} 折扣反推
+          </div>
+        </div>
+      </div>
+
+      <div className="stat-row waste-stats">
+        <div className="stat">
+          <div className="k">碎片化指数</div>
+          <div className={`v waste-verdict waste-${data.verdict}`}>
+            {data.fragmentation.toFixed(1)}
+            <span className="unit">×</span>
+          </div>
+          <div className="s">
+            平均每个项目 {data.fragmentation.toFixed(1)} 个会话 · 共 {fmtInt(data.sessions)} 个 · {sevLabel[data.verdict]}
+          </div>
+        </div>
+        <div className="stat">
+          <div className="k">首轮学费合计</div>
+          <div className="v">{fmtCost(data.total_waste_usd)}</div>
+          <div className="s">每次新会话第一枪本可省下的钱（估算）</div>
+        </div>
+        <div className="stat">
+          <div className="k">最该改的项目</div>
+          <div className="v waste-path" title={data.rows[0]?.cwd}>
+            {shortPath(data.rows[0]?.cwd ?? null)}
+          </div>
+          <div className="s">首轮学费 {fmtCost(data.rows[0]?.waste_usd ?? 0)}</div>
+        </div>
+      </div>
+
+      <div className="panel">
+        <div className="section-head" style={{ marginBottom: 16 }}>
+          <h2 style={{ fontSize: 16 }}>建议</h2>
+          <span className="sub">按预计可省金额排序</span>
+        </div>
+
+        <div className="waste-advice">
+          {data.advice.map((a, i) => (
+            <div key={i} className={`waste-advice-row waste-${a.severity}`}>
+              <div className="waste-advice-sev" aria-hidden />
+              <div className="waste-advice-body">
+                <div className="waste-advice-action">{a.action}</div>
+                <div className="waste-advice-why">{a.why}</div>
+              </div>
+              {a.save !== null && a.save > 0 && (
+                <div className="waste-advice-save">
+                  <span className="k">可省</span>
+                  <span className="v">{fmtCost(a.save)}</span>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+
+        <div className="peak-note">
+          估算口径：首轮的新鲜输入按 1/{data.discount} 缓存价反推，
+          并非厂商账单。订阅用户请以「额度是否够用」为准——
+          这里算的是 API 等价成本。
+        </div>
+      </div>
+
+      {data.rows.length > 0 && (
+        <div className="panel">
+          <div className="section-head" style={{ marginBottom: 16 }}>
+            <h2 style={{ fontSize: 16 }}>按项目</h2>
+            <span className="sub">首轮学费 = 每次开工重新喂上下文的代价</span>
+          </div>
+
+          <div className="table-scroll">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>项目</th>
+                  <th>会话</th>
+                  <th>首轮输入</th>
+                  <th>学费</th>
+                  <th>占成本</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.rows.slice(0, 12).map((r) => (
+                  <tr key={r.cwd}>
+                    <td>
+                      <span className="proj-path" title={r.cwd}>
+                        {shortPath(r.cwd)}
+                      </span>
+                    </td>
+                    <td>{fmtInt(r.sessions)}</td>
+                    <td>{tokens(r.first_input_tokens)}</td>
+                    <td>{r.waste_usd > 0 ? fmtCost(r.waste_usd) : "—"}</td>
+                    <td>{r.waste_share > 0 ? `${r.waste_share.toFixed(1)}%` : "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {data.rows.length > 12 && (
+            <div className="peak-note">另有 {fmtInt(data.rows.length - 12)} 个项目未列出。</div>
+          )}
+        </div>
+      )}
     </section>
   );
 }

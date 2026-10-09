@@ -222,6 +222,46 @@ export interface ColdStartData {
   discount: number;
 }
 
+/** 浪费诊断里单个项目的首轮学费 */
+export interface WasteRow {
+  cwd: string;
+  sessions: number;
+  total_tokens: number;
+  cost_usd: number;
+  first_input_tokens: number;
+  first_cost_usd: number;
+  /** 首轮学费占该项目成本的比例（%） */
+  waste_share: number;
+  /** 本可省下的钱（反推值，非账单） */
+  waste_usd: number;
+  requests_per_session: number;
+  /** 该项目成本是否来自估算而非日志自带 */
+  cost_source_estimated: boolean;
+}
+
+export interface WasteAdvice {
+  kind: "fragmentation" | "project" | "context" | "ok";
+  severity: "ok" | "mild" | "moderate" | "severe";
+  /** 具体到能照着做的动作 */
+  action: string;
+  /** 依据哪个数字 */
+  why: string;
+  /** 预计省多少，无样本时为 null */
+  save: number | null;
+}
+
+export interface WasteData {
+  projects: number;
+  sessions: number;
+  /** 平均每个项目开了多少个会话。1 = 不碎，越大越碎 */
+  fragmentation: number;
+  total_waste_usd: number;
+  rows: WasteRow[];
+  discount: number;
+  verdict: "ok" | "mild" | "moderate" | "severe";
+  advice: WasteAdvice[];
+}
+
 export interface ScanRun {
   id: number;
   started_at: number;
@@ -265,6 +305,7 @@ export interface Dashboard {
   rate: RateData;
   projects: ProjectRow[];
   coldStart: ColdStartData;
+  waste: WasteData;
   sessions: SessionRow[];
   recentEvents: EventRow[];
   lastScan: ScanRun | null;

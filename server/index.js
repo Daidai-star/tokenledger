@@ -92,6 +92,7 @@ function dashboardPayload(range) {
     rate: queries.rate(range),
     projects: queries.projects(range),
     coldStart: queries.coldStart(range),
+    waste: queries.waste(range),
     sessions: queries.sessions(range),
     recentEvents: queries.recentEvents({ ...range, limit: 40 }),
     lastScan: store.lastScan(),
@@ -130,6 +131,9 @@ const routes = {
   "GET /api/projects": (range) => queries.projects(range),
 
   "GET /api/cold-start": (range) => queries.coldStart(range),
+
+  // 同上，含 cwd，只在本机提供
+  "GET /api/waste": (range) => queries.waste(range),
 
   "GET /api/weekday": (range) => queries.weekday(range),
 

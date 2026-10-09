@@ -1158,6 +1158,99 @@ code {
   padding-inline: 4px;
 }
 
+/* ---- 浪费诊断 ---- */
+
+.waste-stats {
+  margin-bottom: 28px;
+}
+
+.waste-verdict {
+  font-variant-numeric: tabular-nums;
+}
+
+.waste-verdict .unit {
+  font-size: 0.5em;
+  margin-left: 2px;
+  color: var(--ink-3);
+}
+
+.waste-ok    { color: var(--c-sage); }
+.waste-mild  { color: var(--ink); }
+.waste-moderate { color: #b07a3c; }
+.waste-severe  { color: var(--accent); }
+
+.waste-path {
+  font-size: 20px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.waste-advice {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.waste-advice-row {
+  display: grid;
+  grid-template-columns: 3px 1fr auto;
+  gap: 16px;
+  align-items: start;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.waste-advice-row:last-child {
+  border-bottom: 0;
+}
+
+.waste-advice-sev {
+  align-self: stretch;
+  border-radius: 2px;
+  background: var(--line);
+}
+
+.waste-advice-row.waste-ok        .waste-advice-sev { background: var(--c-sage); }
+.waste-advice-row.waste-mild      .waste-advice-sev { background: var(--ink-3); }
+.waste-advice-row.waste-moderate  .waste-advice-sev { background: #b07a3c; }
+.waste-advice-row.waste-severe    .waste-advice-sev { background: var(--accent); }
+
+.waste-advice-body {
+  min-width: 0;
+}
+
+.waste-advice-action {
+  font-size: 14.5px;
+  color: var(--ink);
+  line-height: 1.5;
+}
+
+.waste-advice-why {
+  margin-top: 4px;
+  font-size: 12.5px;
+  line-height: 1.65;
+  color: var(--ink-3);
+}
+
+.waste-advice-save {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.waste-advice-save .k {
+  display: block;
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+  color: var(--ink-3);
+}
+
+.waste-advice-save .v {
+  font-size: 16px;
+  font-variant-numeric: tabular-nums;
+  color: var(--c-sage);
+}
+
 .table th {
   text-align: right;
   color: var(--ink-3);
