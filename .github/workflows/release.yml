@@ -50,10 +50,12 @@ jobs:
           node-version: 24
           cache: npm
 
-      - name: 安装 Linux/Windows 构建依赖
-        if: runner.os == 'Windows'
-        run: |
-          choco install -y windows-tauri
+      - run: npm ci
+
+      # 打包 MSI / NSIS 需要的 WiX v3 与 NSIS 由 tauri-bundler 自行下载
+      # 到 AppData，runner 无需预装；WebView2 runtime 在 windows-latest 上已预装。
+      # 所以这里刻意不装任何系统包 —— 之前写的 choco install windows-tauri
+      # 是个不存在的包名，直接 404（v0.1.0 首次构建即因此失败）。
 
       # 交叉编译到 x86_64 必需：runner 本身只有 arm64 的 target。
       # 少了这一步，`tauri build --target x86_64-apple-darwin` 会直接失败。
@@ -64,13 +66,15 @@ jobs:
           rustup target add ${{ matrix.target }}
           rustup target list --installed
 
-      - run: npm ci
-
       - name: 测试
         run: npm test
 
       - name: 类型检查
         run: npm run typecheck
+
+      # build-sidecar 要拷 dist/ 里的前端产物，必须先构建
+      - name: 构建前端
+        run: npm run build
 
       # sidecar 里塞的是 Node 运行时二进制，必须与目标平台一致。
       # 用 shell 分支而不是表达式三元：GitHub 表达式里的 && || 没有优先级，
