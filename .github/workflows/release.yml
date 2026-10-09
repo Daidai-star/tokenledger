@@ -158,7 +158,29 @@ jobs:
           merge-multiple: true
 
       - name: 列出产物
-        run: ls -lh artifacts
+        run: find artifacts -type f -exec ls -lh {} +
+
+      # 这条断言是有血的教训：之前 files: artifacts/* 只匹配顶层，
+      # 而 upload-artifact 保留了 msi/ nsis/ 子目录结构，于是 Windows 的
+      # 安装包被静默漏掉，job 却显示成功，发出了一个只有 macOS 的 Release。
+      # 少一个平台会让用户直接下载失败，所以这里显式校验四个安装包都在。
+      - name: 校验安装包齐全
+        run: |
+          set -euo pipefail
+          missing=0
+          for pat in '*.dmg' '*.msi' '*-setup.exe'; do
+            count=$(find artifacts -type f -name "$pat" | wc -l | tr -d ' ')
+            echo "$pat -> $count 个"
+            if [ "$count" -eq 0 ]; then
+              echo "::error::缺少 $pat 安装包"
+              missing=1
+            fi
+          done
+          if [ "$missing" -ne 0 ]; then
+            echo "产物不完整，拒绝发布半成品 Release"
+            exit 1
+          fi
+          echo "安装包齐全"
 
       - name: 生成说明
         run: |
@@ -179,7 +201,10 @@ jobs:
       - name: 创建 Release
         uses: softprops/action-gh-release@v2
         with:
-          files: artifacts/*
+          # 必须用 ** 而不是 *：upload-artifact 保留了各平台的子目录结构
+          # （Windows 的装在 artifacts/msi/ 与 artifacts/nsis/ 下），
+          # 单层通配符匹配不到它们，会静默漏发 Windows 安装包。
+          files: artifacts/**
           body_path: notes.md
           draft: false
           prerelease: ${{ contains(github.ref_name, '-') }}
