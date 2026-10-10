@@ -7,9 +7,42 @@ import { tokens, fmtCost, fmtInt, fmtDate, modelColor, bareModel } from "../form
  */
 
 /** 挂载即入场 */
+/**
+ * 元素进入视口时返回 true，只触发一次。
+ *
+ * 之前这里是 `useState(true)` —— 从没检测过视口，图表一挂载就当"已可见"，
+ * 于是曲线直接出现在屏幕上，没有任何"画出来"的过程。
+ * 真正接上 IntersectionObserver 后，图表要滚到眼前才开始绘制，
+ * 这正是「翻到表的时候有绘制动画」的关键。
+ *
+ * rootMargin 上边给 80px：元素刚露头一点点就开始画，用户不用等到完全
+ * 滚到位才看到动作，避免"滑过去了才发现有动画"的滞后感。
+ */
 export function useInView<T extends HTMLElement>(_threshold = 0) {
   const ref = useRef<T | null>(null);
-  const [inView] = useState(true);
+  const [inView, setInView] = useState(false);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    // 环境不支持时直接放行，保证内容永远可见（不能因为动画 API 缺失而丢内容）
+    if (typeof IntersectionObserver === "undefined") {
+      setInView(true);
+      return;
+    }
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) {
+          setInView(true);
+          io.disconnect(); // 只触发一次：滚回去不要重播，用户会烦
+        }
+      },
+      { threshold: _threshold, rootMargin: "0px 0px -10% 0px" },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, [_threshold]);
+
   return { ref, inView };
 }
 
@@ -93,6 +126,19 @@ export function TrendChart({
               <stop offset="100%" stopColor={s.color} stopOpacity="0.03" />
             </linearGradient>
           ))}
+          {/* 面积揭示用的矩形：从左向右展开，和折线的绘制节奏同步 */}
+          <clipPath id="reveal">
+            <rect
+              x={0}
+              y={0}
+              height={H}
+              /* SVG 属性无法直接跑 CSS transition，用 style 触发 */
+              style={{
+                width: inView ? iw + PAD.l + PAD.r : 0,
+                transition: `width 1.1s cubic-bezier(0.22, 1, 0.36, 1)`,
+              }}
+            />
+          </clipPath>
         </defs>
 
         {Array.from({ length: GRID + 1 }, (_, i) => {
@@ -108,18 +154,35 @@ export function TrendChart({
           );
         })}
 
+        {/* 面积层：用 clipPath 从左向右揭示，和折线同步生长 */}
+        <g clipPath="url(#reveal)">
+          {series.map((s, i) => (
+            <path
+              key={`fill-${s.key}`}
+              d={inView ? path(cum[i], i === 0 ? undefined : cum[i - 1]) : ""}
+              fill={`url(#g-${s.key})`}
+              stroke="none"
+            />
+          ))}
+        </g>
+
         {series.map((s, i) => (
           <path
             key={s.key}
             d={inView ? path(cum[i], i === 0 ? undefined : cum[i - 1]) : ""}
-            fill={`url(#g-${s.key})`}
+            fill="none"
             stroke={s.color}
             strokeWidth={1.25}
             strokeLinejoin="round"
-            /* dasharray + dashoffset 动画让折线像笔迹一样画出来。
-               1400 是覆盖整条曲线的上限长度，够长就不会提前露尾。 */
-            strokeDasharray="1400"
-            style={{ animationDelay: `${i * 90}ms` }}
+            /* dasharray/dashoffset 动画让折线像笔迹一样从左画到右。
+               用 pathLength="1" 把归一化成长度设为 1，dashoffset 从 1 动画到 0，
+               这样不管曲线实际多长，绘制时长都一致——不必猜 dasharray 数值。 */
+            pathLength={1}
+            strokeDasharray="1"
+            strokeDashoffset={inView ? 0 : 1}
+            style={{
+              transition: `stroke-dashoffset 1.1s cubic-bezier(0.22, 1, 0.36, 1) ${i * 110}ms`,
+            }}
             className="trend-area"
           />
         ))}
@@ -608,20 +671,20 @@ export function TokenBreakdown({
 
 // ---------------------------------------------------------------- 速率迷你图
 
-/** 最近 N 分钟的滚动速率条形图 */
-export function RateSpark({ recent }: { recent: { minute: number; tokens: number }[] }) {
+/** 最近 N 秒的滚动速率条形图 */
+export function RateSpark({ recent }: { recent: { second: number; tokens: number }[] }) {
   if (!recent.length) return <div className="empty-hint">暂无速率数据</div>;
   const max = Math.max(1, ...recent.map((r) => r.tokens));
   return (
     <div className="rate-spark">
       {recent.map((r) => (
         <i
-          key={r.minute}
+          key={r.second}
           style={{
             height: `${Math.max(r.tokens > 0 ? 4 : 1, (r.tokens / max) * 100)}%`,
             opacity: r.tokens > 0 ? 0.45 + (r.tokens / max) * 0.55 : 0.12,
           }}
-          title={`${new Date(r.minute * 60 * 1000).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })} · ${tokens(r.tokens)}`}
+          title={`${new Date(r.second * 1000).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit" })} · ${tokens(r.tokens)}`}
         />
       ))}
     </div>

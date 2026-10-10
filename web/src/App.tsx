@@ -19,6 +19,7 @@ import {
   WasteSection,
 } from "./components/Insights";
 import { MallSection } from "./components/Mall";
+import { TABS, sectionsInTab } from "./sections";
 import ScanFlow from "./components/ScanFlow";
 import { fetchDashboard, triggerReset, triggerScan } from "./api";
 import type { Dashboard, Range, ScanProgress, ToolMeta, ToolSeriesCell } from "./types";
@@ -274,24 +275,24 @@ function RateSection({ data }: { data: Dashboard }) {
       <div className="section-head">
         <div>
           <h2>Token 速率</h2>
-          <div className="sub">按分钟分桶计算的吞吐强度，反映「你真正在写代码时」的密度</div>
+          <div className="sub">按秒分桶计算的吞吐强度，反映「你真正在写代码时」的密度</div>
         </div>
       </div>
 
       <div className="rate-hero">
         <div className="rate-cell primary">
-          <div className="k">活跃时段平均</div>
+          <div className="k">活跃秒平均</div>
           <div className="v">
-            {tokens(o.avgPerMinute)}
-            <small>tok/min</small>
+            {tokens(o.avgPerSecond)}
+            <small>tok/s</small>
           </div>
-          <div className="s">中位数 {tokens(o.medianPerMinute)}</div>
+          <div className="s">中位数 {tokens(o.medianPerSecond)}</div>
         </div>
         <div className="rate-cell" style={{ animationDelay: "60ms" }}>
-          <div className="k">峰值速率</div>
+          <div className="k">峰值秒</div>
           <div className="v">
-            {tokens(o.peakPerMinute)}
-            <small>tok/min</small>
+            {tokens(o.peakPerSecond)}
+            <small>tok/s</small>
           </div>
           <div className="s">
             {o.peakAt
@@ -300,6 +301,7 @@ function RateSection({ data }: { data: Dashboard }) {
                   day: "numeric",
                   hour: "2-digit",
                   minute: "2-digit",
+                  second: "2-digit",
                 })}`
               : "—"}
           </div>
@@ -307,10 +309,10 @@ function RateSection({ data }: { data: Dashboard }) {
         <div className="rate-cell" style={{ animationDelay: "120ms" }}>
           <div className="k">P95</div>
           <div className="v">
-            {tokens(o.p95PerMinute)}
-            <small>tok/min</small>
+            {tokens(o.p95PerSecond)}
+            <small>tok/s</small>
           </div>
-          <div className="s">95% 的活跃分钟低于此值</div>
+          <div className="s">95% 的活跃秒低于此值</div>
         </div>
         <div className="rate-cell" style={{ animationDelay: "180ms" }}>
           <div className="k">活跃时长</div>
@@ -318,10 +320,10 @@ function RateSection({ data }: { data: Dashboard }) {
             {fmtInt(o.activeHours)}
             <small>小时</small>
           </div>
-          <div className="s">{fmtInt(o.activeMinutes)} 分钟有请求</div>
+          <div className="s">{fmtInt(o.activeSeconds)} 秒有请求</div>
         </div>
         <div className="rate-cell" style={{ animationDelay: "240ms" }}>
-          <div className="k">最近 60 分钟</div>
+          <div className="k">最近 60 秒</div>
           <div style={{ marginTop: 8 }}>
             <RateSpark recent={r.recent} />
           </div>
@@ -344,7 +346,7 @@ function RateSection({ data }: { data: Dashboard }) {
             series={[
               {
                 key: "rate",
-                label: "tok/min",
+                label: "tok/min（活跃分钟均值）",
                 color: "var(--c-clay)",
                 values: r.byDay.map((d) => d.perMinute),
               },
@@ -354,14 +356,14 @@ function RateSection({ data }: { data: Dashboard }) {
           <div className="peak-note" style={{ marginTop: 16 }}>
             日均峰值出现在 <b>{fmtDateFull(bestDay)}</b>，当日活跃{" "}
             <b>{fmtInt(bestDayData?.activeMinutes || 0)}</b> 分钟，
-            平均 <b>{tokens(bestDayData?.perMinute || 0)}</b> tok/min。
+            活跃分钟内平均 <b>{tokens(bestDayData?.perMinute || 0)}</b> tok/min。
           </div>
         </div>
 
         <div className="panel">
           <div className="section-head" style={{ marginBottom: 16 }}>
             <h2 style={{ fontSize: 16 }}>时段速率</h2>
-            <span className="sub">活跃分钟内的 tok/min</span>
+            <span className="sub">活跃分钟内的平均 tok/min</span>
           </div>
           <HourBars hours={r.byHour} valueKey="perMinute" format={tokens} />
           <div style={{ marginTop: 22 }}>
@@ -369,7 +371,7 @@ function RateSection({ data }: { data: Dashboard }) {
               rows={r.byTool.slice(0, 5).map((t) => ({
                 key: t.tool,
                 label: toolName(t.tool),
-                sub: `${fmtInt(t.activeMinutes)}min`,
+                sub: `${fmtInt(t.activeMinutes)} 分钟`,
                 value: t.perMinute,
                 color: toolColor(t.tool),
                 extra: `${fmtInt(t.requests)} 次`,
@@ -382,7 +384,7 @@ function RateSection({ data }: { data: Dashboard }) {
 
       {o.peakBreakdown.length > 0 && (
         <div className="peak-note">
-          峰值分钟由{" "}
+          峰值秒由{" "}
           {o.peakBreakdown.slice(0, 3).map((b, i) => (
             <span key={b.tool}>
               {i > 0 && "、"}
@@ -393,6 +395,43 @@ function RateSection({ data }: { data: Dashboard }) {
         </div>
       )}
     </section>
+  );
+}
+
+/**
+ * 分栏开关。渲染成 null 就是「不显示」——比用 CSS 隐藏好，因为
+ * 隐藏的图表仍会跑 IntersectionObserver、仍在 layout 里占位，
+ * 切栏时会出现空白跳动。
+ */
+function Tab({ name, tab, children }: { name: string; tab: string; children: React.ReactNode }) {
+  if (!sectionsInTab(tab).includes(name)) return null;
+  return <>{children}</>;
+}
+
+/** 分栏标签栏。粘在顶部，滚动时始终可达。 */
+function TabBar({ tab, setTab }: { tab: string; setTab: (t: string) => void }) {
+  return (
+    <nav className="tabbar" aria-label="分栏导航">
+      <div className="tabbar-inner">
+        {TABS.map((t) => (
+          <button
+            key={t.name}
+            className={`tabbar-btn ${tab === t.name ? "on" : ""}`}
+            onClick={() => {
+              setTab(t.name);
+              // 切栏后滚回顶部：否则会停在上一个栏滚到一半的位置，
+              // 看起来像「页面没反应」。平滑滚动尊重用户的动效偏好。
+              const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+              window.scrollTo({ top: 0, behavior: reduce ? "auto" : "smooth" });
+            }}
+            aria-current={tab === t.name ? "page" : undefined}
+          >
+            <span className="tabbar-name">{t.name}</span>
+            <span className="tabbar-hint">{t.hint}</span>
+          </button>
+        ))}
+      </div>
+    </nav>
   );
 }
 
@@ -407,6 +446,8 @@ export default function App() {
     percent: 0,
   });
   const [metric, setMetric] = useState<"total_tokens" | "requests" | "cost_usd">("total_tokens");
+  // 分栏：当前看哪一栏。诊断默认放最前——它给的是行动建议，用户最该先看。
+  const [tab, setTab] = useState("诊断");
   const [focusModel, setFocusModel] = useState<string | null>(null);
 
   useEffect(() => {
@@ -566,6 +607,8 @@ export default function App() {
 
       <Toolbar range={range} setRange={setRange} tools={data.tools} byTool={data.byTool} />
 
+      <TabBar tab={tab} setTab={setTab} />
+
       <section className="stat-row">
         <Metric label="总 Token" value={tokens(o.total_tokens)} sub={`输出 ${tokens(o.output_tokens)}`} />
         <Metric label="请求" value={fmtInt(o.requests)} sub={`${fmtInt(o.sessions)} 会话`} delay={60} />
@@ -587,281 +630,313 @@ export default function App() {
         costUsd={o.cost_usd}
       />
 
-      <section className="section">
-        <div className="section-head">
-          <div>
-            <h2>用量趋势</h2>
-            <div className="sub">
-              {trend.labels.length} 天 · 峰值 {metricFmt(Math.max(0, ...trend.series.flatMap((s) => s.values)))}
+      <Tab name="用量趋势" tab={tab}>
+  <section className="section">
+          <div className="section-head">
+            <div>
+              <h2>用量趋势</h2>
+              <div className="sub">
+                {trend.labels.length} 天 · 峰值 {metricFmt(Math.max(0, ...trend.series.flatMap((s) => s.values)))}
+              </div>
+            </div>
+            <div className="actions">
+              <div className="segmented">
+                {(
+                  [
+                    ["total_tokens", "Token"],
+                    ["requests", "请求"],
+                    ["cost_usd", "成本"],
+                  ] as const
+                ).map(([k, label]) => (
+                  <button key={k} className={metric === k ? "on" : ""} onClick={() => setMetric(k)}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+              {focusModel && (
+                <button className="btn" onClick={() => setFocusModel(null)}>
+                  退出 {bareModel(focusModel)} 聚焦
+                </button>
+              )}
             </div>
           </div>
-          <div className="actions">
-            <div className="segmented">
-              {(
-                [
-                  ["total_tokens", "Token"],
-                  ["requests", "请求"],
-                  ["cost_usd", "成本"],
-                ] as const
-              ).map(([k, label]) => (
-                <button key={k} className={metric === k ? "on" : ""} onClick={() => setMetric(k)}>
-                  {label}
-                </button>
+          <TrendChart labels={trend.labels} series={trend.series} height={250} yFormat={metricFmt} />
+          <div className="legend-strip">
+            {trend.series.map((s) => (
+              <span key={s.key} className="item">
+                <span className="dot" style={{ background: s.color }} />
+                {s.label}
+              </span>
+            ))}
+          </div>
+        </section>
+      </Tab>
+
+      <Tab name="Token 速率" tab={tab}>
+        <RateSection data={data} />
+      </Tab>
+
+      <Tab name="项目账单" tab={tab}>
+        <ProjectSection rows={data.projects} />
+      </Tab>
+
+      <Tab name="缓存冷启动" tab={tab}>
+        <ColdStartSection data={data.coldStart} />
+      </Tab>
+
+      <Tab name="浪费诊断" tab={tab}>
+        <WasteSection data={data.waste} />
+      </Tab>
+
+      <Tab name="预算护栏" tab={tab}>
+        <GuardSection data={data.guard} />
+      </Tab>
+
+      <Tab name="额度够用吗" tab={tab}>
+        <PaceSection data={data.pace} />
+      </Tab>
+
+      <Tab name="购买力" tab={tab}>
+        <MallSection
+          costUsd={o.cost_usd}
+          stats={{
+            totalTokens: o.total_tokens,
+            requests: o.requests,
+            models: data.byModel.length,
+            activeDays: data.profile.activeDays.length,
+            span:
+              data.profile.activeDays.length > 0
+                ? `${data.profile.activeDays[0].day} → ${data.profile.activeDays[data.profile.activeDays.length - 1].day}`
+                : "",
+            tools: data.byTool.map((t) => ({
+              name: toolName(t.tool),
+              tokens: t.total_tokens,
+              color: toolColor(t.tool),
+            })),
+          }}
+        />
+      </Tab>
+
+      <Tab name="构成" tab={tab}>
+  <section className="section">
+          <div className="section-head">
+            <h2>构成</h2>
+          </div>
+          <div className="grid-2">
+            <div className="panel">
+              <div className="section-head" style={{ marginBottom: 18 }}>
+                <h2 style={{ fontSize: 16 }}>工具占比</h2>
+              </div>
+              <DonutChart
+                slices={donutSlices}
+                centerLabel="总 Token"
+                centerValue={tokens(o.total_tokens)}
+              />
+            </div>
+            <div className="panel">
+              <div className="section-head" style={{ marginBottom: 18 }}>
+                <h2 style={{ fontSize: 16 }}>Token 构成</h2>
+              </div>
+              <TokenBreakdown
+                input={o.input_tokens}
+                output={o.output_tokens}
+                cacheRead={o.cache_read_tokens}
+                cacheWrite={o.cache_write_tokens}
+                reasoning={o.reasoning_tokens}
+              />
+            </div>
+          </div>
+        </section>
+      </Tab>
+
+      <Tab name="模型排行" tab={tab}>
+  <section className="section">
+          <div className="section-head">
+            <div>
+              <h2>模型排行</h2>
+              <div className="sub">点击任意模型，上方趋势图会下钻到它</div>
+            </div>
+          </div>
+          <div className="panel">
+            <RankBars
+              rows={modelRows}
+              onSelect={(m) => setFocusModel(focusModel === m ? null : m)}
+              selected={focusModel}
+            />
+          </div>
+        </section>
+      </Tab>
+
+      <Tab name="活跃热力图" tab={tab}>
+  <section className="section">
+          <div className="grid-2">
+            <div className="panel">
+              <div className="section-head" style={{ marginBottom: 16 }}>
+                <div>
+                  <h2 style={{ fontSize: 16 }}>活跃热力图</h2>
+                  <div className="sub">Codex profile 风格</div>
+                </div>
+              </div>
+              <ActivityHeatmap
+                days={data.profile.activeDays.map((d) => ({ day: d.day, tokens: d.tokens }))}
+              />
+            </div>
+
+            <div className="panel">
+              <div className="section-head" style={{ marginBottom: 16 }}>
+                <div>
+                  <h2 style={{ fontSize: 16 }}>时段活跃</h2>
+                  <div className="sub">本地时间 · 请求数</div>
+                </div>
+              </div>
+              <HourBars hours={data.hourly} />
+            </div>
+          </div>
+        </section>
+      </Tab>
+
+      <Tab name="工具 × 模型" tab={tab}>
+  <section className="section">
+          <div className="section-head">
+            <div>
+              <h2>工具 × 模型</h2>
+              <div className="sub">点击格子聚焦该模型</div>
+            </div>
+          </div>
+          <ToolModelMatrix
+            rows={data.matrix.map((r) => ({
+              tool: r.tool,
+              model: r.model,
+              total_tokens: r.total_tokens,
+              requests: r.requests,
+            }))}
+            onSelect={(m) => setFocusModel(focusModel === m ? null : m)}
+          />
+        </section>
+      </Tab>
+
+      <Tab name="成本构成" tab={tab}>
+  <section className="section">
+          <div className="grid-2">
+            <div className="panel">
+              <div className="section-head" style={{ marginBottom: 18 }}>
+                <h2 style={{ fontSize: 16 }}>成本构成</h2>
+              </div>
+              <CompositionBar items={costItems} />
+            </div>
+
+            <div className="panel">
+              <div className="section-head" style={{ marginBottom: 18 }}>
+                <h2 style={{ fontSize: 16 }}>工具明细</h2>
+              </div>
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>工具</th>
+                    <th>请求</th>
+                    <th>Token</th>
+                    <th>模型</th>
+                    <th>成本</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.byTool.map((r) => (
+                    <tr key={r.tool}>
+                      <td>
+                        <span
+                          className="dot"
+                          style={{ background: toolColor(r.tool), marginRight: 7 }}
+                        />
+                        {toolName(r.tool)}
+                      </td>
+                      <td>{fmtInt(r.requests)}</td>
+                      <td>{tokens(r.total_tokens)}</td>
+                      <td>{r.model_count}</td>
+                      <td>{r.cost_usd > 0 ? fmtCost(r.cost_usd) : "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+      </Tab>
+
+      <Tab name="最近会话" tab={tab}>
+  <section className="section">
+          <div className="section-head">
+            <h2>最近会话</h2>
+          </div>
+          <div className="panel">
+            {data.sessions.length === 0 && <div className="empty-hint">暂无会话</div>}
+            <div className="sessions">
+              {data.sessions.map((s) => (
+                <article key={`${s.tool}-${s.session_id}`} className="session">
+                  <span
+                    className="session-tool"
+                    style={{ background: toolColor(s.tool) }}
+                  />
+                  <div className="session-main">
+                    <div className="session-title">{s.title || shortPath(s.cwd)}</div>
+                    <div className="session-meta">
+                      {toolName(s.tool)} · {bareModel(s.model || "—")} ·{" "}
+                      {fmtInt(s.requests)} 次请求 · {shortPath(s.cwd)} · {fmtAgo(s.started_at)}
+                    </div>
+                  </div>
+                  <div className="session-nums">
+                    <b>{tokens(s.total_tokens)}</b>
+                    <span>{s.cost_usd > 0 ? fmtCost(s.cost_usd) : "—"}</span>
+                  </div>
+                </article>
               ))}
             </div>
-            {focusModel && (
-              <button className="btn" onClick={() => setFocusModel(null)}>
-                退出 {bareModel(focusModel)} 聚焦
-              </button>
-            )}
           </div>
-        </div>
-        <TrendChart labels={trend.labels} series={trend.series} height={250} yFormat={metricFmt} />
-        <div className="legend-strip">
-          {trend.series.map((s) => (
-            <span key={s.key} className="item">
-              <span className="dot" style={{ background: s.color }} />
-              {s.label}
-            </span>
-          ))}
-        </div>
-      </section>
+        </section>
+      </Tab>
 
-      <RateSection data={data} />
-
-      <ProjectSection rows={data.projects} />
-
-      <ColdStartSection data={data.coldStart} />
-
-      <WasteSection data={data.waste} />
-
-      <GuardSection data={data.guard} />
-
-      <PaceSection data={data.pace} />
-
-      <MallSection
-        costUsd={o.cost_usd}
-        stats={{
-          totalTokens: o.total_tokens,
-          requests: o.requests,
-          models: data.byModel.length,
-          activeDays: data.profile.activeDays.length,
-          span:
-            data.profile.activeDays.length > 0
-              ? `${data.profile.activeDays[0].day} → ${data.profile.activeDays[data.profile.activeDays.length - 1].day}`
-              : "",
-          tools: data.byTool.map((t) => ({
-            name: toolName(t.tool),
-            tokens: t.total_tokens,
-            color: toolColor(t.tool),
-          })),
-        }}
-      />
-
-      <section className="section">
-        <div className="section-head">
-          <h2>构成</h2>
-        </div>
-        <div className="grid-2">
-          <div className="panel">
-            <div className="section-head" style={{ marginBottom: 18 }}>
-              <h2 style={{ fontSize: 16 }}>工具占比</h2>
+      <Tab name="最近请求" tab={tab}>
+  <section className="section">
+          <div className="section-head">
+            <div>
+              <h2>最近请求</h2>
+              <div className="sub">按时间倒序的实时事件流</div>
             </div>
-            <DonutChart
-              slices={donutSlices}
-              centerLabel="总 Token"
-              centerValue={tokens(o.total_tokens)}
-            />
           </div>
           <div className="panel">
-            <div className="section-head" style={{ marginBottom: 18 }}>
-              <h2 style={{ fontSize: 16 }}>Token 构成</h2>
+            <div className="events">
+              {data.recentEvents.map((e) => (
+                <div key={e.event_id} className={`event${e.success ? "" : " failed"}`}>
+                  <span className="event-time">{fmtTime(e.ts)}</span>
+                  <span className="event-tool">{toolName(e.tool)}</span>
+                  <span className="event-model">{bareModel(e.model)}</span>
+                  <span className="event-path">{shortPath(e.cwd)}</span>
+                  <span className="event-tokens">{tokens(e.total_tokens)}</span>
+                  <span className="event-cost">
+                    {e.cost_usd != null ? fmtCost(e.cost_usd) : "—"}
+                    {e.cost_source && <em>{e.cost_source}</em>}
+                  </span>
+                </div>
+              ))}
             </div>
-            <TokenBreakdown
-              input={o.input_tokens}
-              output={o.output_tokens}
-              cacheRead={o.cache_read_tokens}
-              cacheWrite={o.cache_write_tokens}
-              reasoning={o.reasoning_tokens}
-            />
           </div>
-        </div>
-      </section>
+        </section>
+      </Tab>
 
-      <section className="section">
-        <div className="section-head">
-          <div>
-            <h2>模型排行</h2>
-            <div className="sub">点击任意模型，上方趋势图会下钻到它</div>
+      <Tab name="采集流程" tab={tab}>
+  <section className="section">
+          <div className="section-head">
+            <h2>
+              采集流程 <span className="live-dot" />
+            </h2>
           </div>
-        </div>
-        <div className="panel">
-          <RankBars
-            rows={modelRows}
-            onSelect={(m) => setFocusModel(focusModel === m ? null : m)}
-            selected={focusModel}
+          <ScanFlow
+            progress={progress}
+            tools={data.tools}
+            onScan={() => triggerScan()}
+            onReset={() => triggerReset()}
           />
-        </div>
-      </section>
-
-      <section className="section">
-        <div className="grid-2">
-          <div className="panel">
-            <div className="section-head" style={{ marginBottom: 16 }}>
-              <div>
-                <h2 style={{ fontSize: 16 }}>活跃热力图</h2>
-                <div className="sub">Codex profile 风格</div>
-              </div>
-            </div>
-            <ActivityHeatmap
-              days={data.profile.activeDays.map((d) => ({ day: d.day, tokens: d.tokens }))}
-            />
-          </div>
-
-          <div className="panel">
-            <div className="section-head" style={{ marginBottom: 16 }}>
-              <div>
-                <h2 style={{ fontSize: 16 }}>时段活跃</h2>
-                <div className="sub">本地时间 · 请求数</div>
-              </div>
-            </div>
-            <HourBars hours={data.hourly} />
-          </div>
-        </div>
-      </section>
-
-      <section className="section">
-        <div className="section-head">
-          <div>
-            <h2>工具 × 模型</h2>
-            <div className="sub">点击格子聚焦该模型</div>
-          </div>
-        </div>
-        <ToolModelMatrix
-          rows={data.matrix.map((r) => ({
-            tool: r.tool,
-            model: r.model,
-            total_tokens: r.total_tokens,
-            requests: r.requests,
-          }))}
-          onSelect={(m) => setFocusModel(focusModel === m ? null : m)}
-        />
-      </section>
-
-      <section className="section">
-        <div className="grid-2">
-          <div className="panel">
-            <div className="section-head" style={{ marginBottom: 18 }}>
-              <h2 style={{ fontSize: 16 }}>成本构成</h2>
-            </div>
-            <CompositionBar items={costItems} />
-          </div>
-
-          <div className="panel">
-            <div className="section-head" style={{ marginBottom: 18 }}>
-              <h2 style={{ fontSize: 16 }}>工具明细</h2>
-            </div>
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>工具</th>
-                  <th>请求</th>
-                  <th>Token</th>
-                  <th>模型</th>
-                  <th>成本</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.byTool.map((r) => (
-                  <tr key={r.tool}>
-                    <td>
-                      <span
-                        className="dot"
-                        style={{ background: toolColor(r.tool), marginRight: 7 }}
-                      />
-                      {toolName(r.tool)}
-                    </td>
-                    <td>{fmtInt(r.requests)}</td>
-                    <td>{tokens(r.total_tokens)}</td>
-                    <td>{r.model_count}</td>
-                    <td>{r.cost_usd > 0 ? fmtCost(r.cost_usd) : "—"}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </section>
-
-      <section className="section">
-        <div className="section-head">
-          <h2>最近会话</h2>
-        </div>
-        <div className="panel">
-          {data.sessions.length === 0 && <div className="empty-hint">暂无会话</div>}
-          <div className="sessions">
-            {data.sessions.map((s) => (
-              <article key={`${s.tool}-${s.session_id}`} className="session">
-                <span
-                  className="session-tool"
-                  style={{ background: toolColor(s.tool) }}
-                />
-                <div className="session-main">
-                  <div className="session-title">{s.title || shortPath(s.cwd)}</div>
-                  <div className="session-meta">
-                    {toolName(s.tool)} · {bareModel(s.model || "—")} ·{" "}
-                    {fmtInt(s.requests)} 次请求 · {shortPath(s.cwd)} · {fmtAgo(s.started_at)}
-                  </div>
-                </div>
-                <div className="session-nums">
-                  <b>{tokens(s.total_tokens)}</b>
-                  <span>{s.cost_usd > 0 ? fmtCost(s.cost_usd) : "—"}</span>
-                </div>
-              </article>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      <section className="section">
-        <div className="section-head">
-          <div>
-            <h2>最近请求</h2>
-            <div className="sub">按时间倒序的实时事件流</div>
-          </div>
-        </div>
-        <div className="panel">
-          <div className="events">
-            {data.recentEvents.map((e) => (
-              <div key={e.event_id} className={`event${e.success ? "" : " failed"}`}>
-                <span className="event-time">{fmtTime(e.ts)}</span>
-                <span className="event-tool">{toolName(e.tool)}</span>
-                <span className="event-model">{bareModel(e.model)}</span>
-                <span className="event-path">{shortPath(e.cwd)}</span>
-                <span className="event-tokens">{tokens(e.total_tokens)}</span>
-                <span className="event-cost">
-                  {e.cost_usd != null ? fmtCost(e.cost_usd) : "—"}
-                  {e.cost_source && <em>{e.cost_source}</em>}
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      <section className="section">
-        <div className="section-head">
-          <h2>
-            采集流程 <span className="live-dot" />
-          </h2>
-        </div>
-        <ScanFlow
-          progress={progress}
-          tools={data.tools}
-          onScan={() => triggerScan()}
-          onReset={() => triggerReset()}
-        />
-      </section>
+        </section>
+      </Tab>
 
       <footer className="foot">
         <span>

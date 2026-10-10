@@ -343,7 +343,7 @@ test("rate 空库返回 null overall", () => {
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-test("rate 按分钟分桶算平均值", () => {
+test("rate 按秒分桶算平均值", () => {
   const { store, q, dir } = freshStore();
   const at = (iso, tokens) => new UsageEvent({
     id: iso + tokens,
@@ -352,16 +352,16 @@ test("rate 按分钟分桶算平均值", () => {
     ts: Date.parse(iso),
     inputTokens: tokens,
   });
-  // 同一分钟两条：100 + 300 = 400
-  store.insertEvents([at("2026-03-01T10:00:10Z", 100), at("2026-03-01T10:00:50Z", 300)]);
-  // 另一分钟一条：200
-  store.insertEvents([at("2026-03-01T10:01:10Z", 200)]);
+  // 同一秒两条（相差 200ms）：100 + 300 = 400
+  store.insertEvents([at("2026-03-01T10:00:10.000Z", 100), at("2026-03-01T10:00:10.200Z", 300)]);
+  // 另一秒一条：200
+  store.insertEvents([at("2026-03-01T10:00:50.000Z", 200)]);
   const r = q.rate({});
-  assert.equal(r.overall.activeMinutes, 2);
+  assert.equal(r.overall.activeSeconds, 2, "同一秒内的两条合并成一个桶");
   assert.equal(r.overall.totalTokens, 600);
-  // (400 + 200) / 2 分钟
-  assert.equal(r.overall.avgPerMinute, 300);
-  assert.equal(r.overall.peakPerMinute, 400);
+  // (400 + 200) / 2 秒
+  assert.equal(r.overall.avgPerSecond, 300);
+  assert.equal(r.overall.peakPerSecond, 400);
   store.close();
   fs.rmSync(dir, { recursive: true, force: true });
 });
@@ -407,27 +407,27 @@ test("rate 的 byTool 按工具分列并按速率降序", () => {
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-test("rate 的 recent 覆盖到最后一分钟且长度正确", () => {
+test("rate 的 recent 覆盖到最后一秒且长度正确", () => {
   const { store, q, dir } = freshStore();
   const ts = Date.parse("2026-03-01T10:00:10Z");
   store.insertEvents([new UsageEvent({ id: "r1", tool: "codex", model: "m", ts, inputTokens: 100 })]);
-  const r = q.rate({ recentMinutes: 30 });
+  const r = q.rate({ recentSeconds: 30 });
   assert.equal(r.recent.length, 30);
-  assert.equal(r.recent[r.recent.length - 1].tokens, 100, "最后一分钟是最新活跃分钟");
+  assert.equal(r.recent[r.recent.length - 1].tokens, 100, "最后一秒是最新活跃秒");
   assert.equal(r.recent.filter((x) => x.tokens > 0).length, 1);
   store.close();
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-test("rate 的 peakBreakdown 指出峰值分钟的来源工具", () => {
+test("rate 的 peakBreakdown 指出峰值秒的来源工具", () => {
   const { store, q, dir } = freshStore();
   const t = Date.parse("2026-03-01T10:00:00Z");
   store.insertEvents([
-    new UsageEvent({ id: "p1", tool: "codex", model: "m", ts: t + 5000, inputTokens: 900 }),
-    new UsageEvent({ id: "p2", tool: "dsh", model: "m", ts: t + 15000, inputTokens: 100 }),
+    new UsageEvent({ id: "p1", tool: "codex", model: "m", ts: t + 5200, inputTokens: 900 }),
+    new UsageEvent({ id: "p2", tool: "dsh", model: "m", ts: t + 5400, inputTokens: 100 }),
   ]);
   const r = q.rate({});
-  assert.equal(r.overall.peakPerMinute, 1000);
+  assert.equal(r.overall.peakPerSecond, 1000);
   assert.equal(r.overall.peakBreakdown.length, 2);
   assert.equal(r.overall.peakBreakdown[0].tool, "codex");
   assert.equal(r.overall.peakBreakdown[0].tokens, 900);
@@ -438,20 +438,20 @@ test("rate 的 peakBreakdown 指出峰值分钟的来源工具", () => {
 
 test("rate 中位数与 P95 对长尾稳健", () => {
   const { store, q, dir } = freshStore();
-  // 10 个普通分钟 + 1 个巨大峰值
+  // 10 个普通秒 + 1 个巨大峰值
   const base = Date.parse("2026-03-01T10:00:00Z");
   for (let i = 0; i < 10; i++) {
     store.insertEvents([
-      new UsageEvent({ id: `n${i}`, tool: "codex", model: "m", ts: base + i * 60_000, inputTokens: 100 }),
+      new UsageEvent({ id: `n${i}`, tool: "codex", model: "m", ts: base + i * 1000, inputTokens: 100 }),
     ]);
   }
   store.insertEvents([
-    new UsageEvent({ id: "spike", tool: "codex", model: "m", ts: base + 20 * 60_000, inputTokens: 100_000 }),
+    new UsageEvent({ id: "spike", tool: "codex", model: "m", ts: base + 20 * 1000, inputTokens: 100_000 }),
   ]);
   const r = q.rate({});
-  assert.equal(r.overall.peakPerMinute, 100_000);
-  assert.equal(r.overall.medianPerMinute, 100, "中位数不被峰值带偏");
-  assert.ok(r.overall.avgPerMinute > r.overall.medianPerMinute, "均值会被拉高");
+  assert.equal(r.overall.peakPerSecond, 100_000);
+  assert.equal(r.overall.medianPerSecond, 100, "中位数不被峰值带偏");
+  assert.ok(r.overall.avgPerSecond > r.overall.medianPerSecond, "均值会被拉高");
   store.close();
   fs.rmSync(dir, { recursive: true, force: true });
 });

@@ -712,17 +712,20 @@ export class Queries {
   rate(q = {}) {
     const w = this.#eventWhere(q);
 
-    // 按「本地时间分钟」分桶。strftime 加 localtime 保证小时/日期跟用户时区一致。
+    // 同时按「本地秒」和「本地分钟」分桶。
+    // 秒级用来回答「我最快的那一秒烧了多少」——分钟桶会把尖峰抹平；
+    // 分钟级保留给按天/按小时的聚合，否则那些视图会因为秒级噪声而抖动。
+    // strftime 加 localtime 保证小时/日期跟用户时区一致。
     const buckets = this.store
       .prep(
         `SELECT
-           CAST(strftime('%s', ts/1000, 'unixepoch', 'localtime') / 60 AS INTEGER) AS minute,
+           CAST(strftime('%s', ts/1000, 'unixepoch', 'localtime') AS INTEGER) AS second,
            day, hour, tool,
            COUNT(*) AS requests,
            SUM(total_tokens) AS tokens,
            SUM(output_tokens) AS output_tokens
          FROM usage_events ${w.where}
-         GROUP BY minute, tool`,
+         GROUP BY second, tool`,
       )
       .all(...w.params);
 
@@ -733,27 +736,35 @@ export class Queries {
         byHour: [],
         byTool: [],
         recent: [],
-        summary: { activeMinutes: 0, totalTokens: 0, avgPerMinute: 0, peakPerMinute: 0 },
+        summary: {
+          activeSeconds: 0,
+          activeMinutes: 0,
+          totalTokens: 0,
+          avgPerSecond: 0,
+          peakPerSecond: 0,
+        },
       };
     }
 
     // ---------- 汇总 ----------
     let totalTokens = 0;
     let totalRequests = 0;
-    const perMinute = new Map(); // minute -> tokens
-    const perMinuteTool = new Map(); // minute -> Map(tool -> tokens)
+    const perSecond = new Map(); // second -> tokens
+    const perSecondTool = new Map(); // second -> Map(tool -> tokens)
     const perDay = new Map(); // day -> {tokens, minutes:Set}
     const perHour = new Map(); // hour -> {tokens, minutes:Set}
     const perTool = new Map(); // tool -> {tokens, minutes:Set}
 
     for (const b of buckets) {
-      const m = b.minute;
+      const s = b.second;
+      // 分钟键仅用于按天/按小时的活跃度统计（秒级太细，聚合会不稳）
+      const m = Math.floor(s / 60);
       totalTokens += b.tokens;
       totalRequests += b.requests;
 
-      perMinute.set(m, (perMinute.get(m) || 0) + b.tokens);
-      if (!perMinuteTool.has(m)) perMinuteTool.set(m, new Map());
-      const mt = perMinuteTool.get(m);
+      perSecond.set(s, (perSecond.get(s) || 0) + b.tokens);
+      if (!perSecondTool.has(s)) perSecondTool.set(s, new Map());
+      const mt = perSecondTool.get(s);
       mt.set(b.tool, (mt.get(b.tool) || 0) + b.tokens);
 
       if (!perDay.has(b.day)) perDay.set(b.day, { tokens: 0, minutes: new Set(), requests: 0 });
@@ -775,30 +786,29 @@ export class Queries {
       t.minutes.add(m);
     }
 
-    const activeMinutes = perMinute.size;
-    const avgPerMinute = totalTokens / activeMinutes;
+    const activeSeconds = perSecond.size;
+    const avgPerSecond = totalTokens / activeSeconds;
 
-    // 峰值：找出 token 最多的那一分钟，并给出当时的工具构成
-    let peakMinute = null;
+    // 峰值：找出 token 最多的那一秒，并给出当时的工具构成
+    let peakSecond = null;
     let peakTokens = 0;
-    for (const [m, tokens] of perMinute) {
+    for (const [s, tokens] of perSecond) {
       if (tokens > peakTokens) {
         peakTokens = tokens;
-        peakMinute = m;
+        peakSecond = s;
       }
     }
-    const peakBreakdown = peakMinute
-      ? [...(perMinuteTool.get(peakMinute) || new Map())]
+    const peakBreakdown = peakSecond
+      ? [...(perSecondTool.get(peakSecond) || new Map())]
           .map(([tool, tokens]) => ({ tool, tokens }))
           .sort((a, b) => b.tokens - a.tokens)
       : [];
 
-    // 中位数：对长尾更稳健，比均值更能代表「常态速率」
-    const sorted = [...perMinute.values()].sort((a, b) => a - b);
-    const medianPerMinute = sorted.length
-      ? sorted[Math.floor(sorted.length / 2)]
-      : 0;
-    const p95PerMinute = sorted.length ? sorted[Math.floor(sorted.length * 0.95)] : 0;
+    // 中位数与 P95：对长尾更稳健，比均值更能代表「常态速率」。
+    // 分母用活跃秒而非全部秒——空秒会把分布压低，那是噪声不是事实。
+    const sorted = [...perSecond.values()].sort((a, b) => a - b);
+    const medianPerSecond = sorted.length ? sorted[Math.floor(sorted.length / 2)] : 0;
+    const p95PerSecond = sorted.length ? sorted[Math.floor(sorted.length * 0.95)] : 0;
 
     // ---------- 每日速率 ----------
     const byDay = [...perDay.entries()]
@@ -835,37 +845,38 @@ export class Queries {
       }))
       .sort((a, b) => b.perMinute - a.perMinute);
 
-    // ---------- 最近 N 分钟滚动速率 ----------
-    const recentMinutes = Number(q.recentMinutes) || 60;
-    const lastMinute = Math.max(...perMinute.keys());
+    // ---------- 最近 N 秒滚动速率 ----------
+    const recentSeconds = Number(q.recentSeconds) || 60;
+    const lastSecond = Math.max(...perSecond.keys());
     const recent = [];
-    for (let m = lastMinute - recentMinutes + 1; m <= lastMinute; m++) {
-      recent.push({ minute: m, tokens: perMinute.get(m) || 0 });
+    for (let s = lastSecond - recentSeconds + 1; s <= lastSecond; s++) {
+      recent.push({ second: s, tokens: perSecond.get(s) || 0 });
     }
 
     return {
       overall: {
-        activeMinutes,
-        totalMinutes: activeMinutes,
+        activeSeconds,
+        activeMinutes: activeSeconds, // 兼容旧字段名，值已是秒级
         totalTokens,
         totalRequests,
-        avgPerMinute: Math.round(avgPerMinute),
-        medianPerMinute: Math.round(medianPerMinute),
-        p95PerMinute: Math.round(p95PerMinute),
-        peakPerMinute: peakTokens,
-        peakAt: peakMinute != null ? peakMinute * 60 * 1000 : null,
+        avgPerSecond: Math.round(avgPerSecond),
+        medianPerSecond: Math.round(medianPerSecond),
+        p95PerSecond: Math.round(p95PerSecond),
+        peakPerSecond: peakTokens,
+        peakAt: peakSecond != null ? peakSecond * 1000 : null,
         peakBreakdown,
-        activeHours: Math.round((activeMinutes / 60) * 10) / 10,
+        activeHours: Math.round((activeSeconds / 3600) * 10) / 10,
       },
       byDay,
       byHour,
       byTool,
       recent,
       summary: {
-        activeMinutes,
+        activeSeconds,
+        activeMinutes: activeSeconds, // 兼容旧字段名
         totalTokens,
-        avgPerMinute: Math.round(avgPerMinute),
-        peakPerMinute: peakTokens,
+        avgPerSecond: Math.round(avgPerSecond),
+        peakPerSecond: peakTokens,
       },
     };
   }

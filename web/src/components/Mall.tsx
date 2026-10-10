@@ -267,25 +267,54 @@ function Cart({ m }: { m: MallResult }) {
 /** 商品阶梯：按档位分组，买得起的点亮，买不起的标出还差多少 */
 function Ladder({ m }: { m: MallResult }) {
   const bands = [0, 1, 2, 3] as Band[];
+  // 15 件商品全展开有 1000+ px，读者滚不到底就放弃了。
+  // 默认只展开「当前预算所在档」和「下一档」——这两档才是他正在纠结的。
+  // 更远的档位折叠成一行摘要，需要时点开。
+  const [expanded, setExpanded] = useState<Set<Band>>(new Set());
+  const currentBand: Band = m.best ? m.best.band : 0;
+  const nearBands = useMemo<Set<Band>>(
+    () => new Set<Band>([currentBand, Math.min(3, currentBand + 1) as Band]),
+    [currentBand],
+  );
+  const isOpen = (b: Band) => nearBands.has(b) || expanded.has(b);
+  const toggle = (b: Band) =>
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(b)) next.delete(b);
+      else next.add(b);
+      return next;
+    });
+
   return (
     <div className="mall-ladder">
       {bands.map((b) => {
         const items = m.rows.filter((r) => r.band === b);
         if (!items.length) return null;
+        const open = isOpen(b);
         return (
           <div className="mall-band" key={b}>
-            <div className="band-head">
+            <button
+              className="band-head band-toggle"
+              onClick={() => toggle(b)}
+              aria-expanded={open}
+            >
               <span className="band-name">{BAND_NAMES[b]}</span>
               <span className="band-hint">{BAND_HINTS[b]}</span>
               <span className="band-range">
                 {fmtCNY(items[0].price)} – {fmtCNY(items[items.length - 1].price)}
               </span>
-            </div>
-            <div className="band-items">
-              {items.map((r) => (
-                <Item key={r.id} r={r} />
-              ))}
-            </div>
+              <span className="band-caret" aria-hidden>
+                {open ? "−" : "+"}
+                <em>{items.length} 件</em>
+              </span>
+            </button>
+            {open && (
+              <div className="band-items">
+                {items.map((r) => (
+                  <Item key={r.id} r={r} />
+                ))}
+              </div>
+            )}
           </div>
         );
       })}

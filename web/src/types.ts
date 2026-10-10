@@ -156,14 +156,16 @@ export interface EventRow {
 }
 
 export interface RateOverall {
+  /** 活跃秒数——速率按秒分桶 */
+  activeSeconds: number;
+  /** @deprecated 旧字段名，值等于 activeSeconds */
   activeMinutes: number;
-  totalMinutes: number;
   totalTokens: number;
   totalRequests: number;
-  avgPerMinute: number;
-  medianPerMinute: number;
-  p95PerMinute: number;
-  peakPerMinute: number;
+  avgPerSecond: number;
+  medianPerSecond: number;
+  p95PerSecond: number;
+  peakPerSecond: number;
   peakAt: number | null;
   peakBreakdown: { tool: string; tokens: number }[];
   activeHours: number;
@@ -174,8 +176,14 @@ export interface RateData {
   byDay: { day: string; tokens: number; requests: number; activeMinutes: number; perMinute: number }[];
   byHour: { hour: number; tokens: number; requests: number; activeMinutes: number; perMinute: number }[];
   byTool: { tool: string; tokens: number; requests: number; activeMinutes: number; perMinute: number }[];
-  recent: { minute: number; tokens: number }[];
-  summary: { activeMinutes: number; totalTokens: number; avgPerMinute: number; peakPerMinute: number };
+  recent: { second: number; tokens: number }[];
+  summary: {
+    activeSeconds: number;
+    activeMinutes: number;
+    totalTokens: number;
+    avgPerSecond: number;
+    peakPerSecond: number;
+  };
 }
 
 /** 按 cwd 聚合的项目账单 */
