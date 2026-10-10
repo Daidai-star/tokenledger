@@ -147,7 +147,7 @@ code {
   padding: 34px 0 22px;
   border-bottom: 1px solid var(--line);
   margin-bottom: 44px;
-  animation: fade-up 0.6s var(--ease) both;
+  animation: fade-up var(--dur-enter) var(--ease) both;
 }
 
 .brand {
@@ -208,7 +208,7 @@ code {
   padding-bottom: 40px;
   border-bottom: 1px solid var(--line);
   margin-bottom: 40px;
-  animation: fade-up 0.7s var(--ease) 0.05s both;
+  animation: fade-up var(--dur-enter) var(--ease) 0.05s both;
 }
 
 .profile-mark {
@@ -319,7 +319,7 @@ code {
   flex: 1;
   padding: 16px 20px 0 0;
   border-right: 1px solid var(--line-soft);
-  animation: fade-up 0.6s var(--ease) both;
+  animation: fade-up var(--dur-enter) var(--ease) both;
 }
 
 .profile-fact:last-child {
@@ -368,7 +368,7 @@ code {
   gap: 7px;
   font-size: 12.5px;
   color: var(--ink-2);
-  animation: fade-up 0.55s var(--ease) both;
+  animation: fade-up var(--dur-enter) var(--ease) both;
 }
 
 .profile-tool .dot {
@@ -393,7 +393,7 @@ code {
   padding-bottom: 18px;
   margin-bottom: 34px;
   border-bottom: 1px solid var(--line);
-  animation: fade-up 0.6s var(--ease) 0.1s both;
+  animation: fade-up var(--dur-enter) var(--ease) 0.1s both;
 }
 
 .tb-group {
@@ -497,13 +497,13 @@ code {
   border-top: 1px solid var(--line);
   border-bottom: 1px solid var(--line);
   margin-bottom: 44px;
-  animation: fade-up 0.6s var(--ease) 0.15s both;
+  animation: fade-up var(--dur-enter) var(--ease) 0.15s both;
 }
 
 .stat {
   padding: 20px 24px 20px 0;
   border-right: 1px solid var(--line-soft);
-  animation: fade-up 0.55s var(--ease) both;
+  animation: fade-up var(--dur-enter) var(--ease) both;
   transition: background 0.25s var(--ease);
 }
 
@@ -538,7 +538,7 @@ code {
 
 .section {
   margin-bottom: 56px;
-  animation: fade-up 0.65s var(--ease) both;
+  animation: fade-up var(--dur-enter) var(--ease) both;
 }
 
 .section-head {
@@ -585,7 +585,7 @@ code {
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--radius-md);
-  animation: fade-up 0.6s var(--ease) both;
+  animation: fade-up var(--dur-enter) var(--ease) both;
 }
 
 .panel-inset {
@@ -628,7 +628,7 @@ code {
 }
 
 .trend-area {
-  animation: fade-in 0.7s var(--ease) both;
+  animation: fade-in var(--dur-enter) var(--ease) both;
 }
 
 @keyframes fade-in {
@@ -738,7 +738,7 @@ code {
   padding: 9px 4px;
   cursor: pointer;
   text-align: left;
-  animation: fade-up 0.5s var(--ease) both;
+  animation: fade-up var(--dur-enter) var(--ease) both;
   transition: background 0.18s;
 }
 
@@ -815,7 +815,7 @@ code {
 }
 
 .donut-arc {
-  animation: fade-in 0.6s var(--ease) both;
+  animation: fade-in var(--dur-enter) var(--ease) both;
   cursor: pointer;
   transition: stroke-width 0.22s var(--ease), opacity 0.22s;
 }
@@ -1144,7 +1144,7 @@ code {
   color: var(--ink-2);
   padding: 5px 0;
   border-bottom: 1px solid var(--line-soft);
-  animation: fade-up 0.45s var(--ease) both;
+  animation: fade-up var(--dur-enter) var(--ease) both;
 }
 
 .tb-row:last-child {
@@ -1175,6 +1175,82 @@ code {
   overflow-x: auto;
   margin-inline: -4px;
   padding-inline: 4px;
+}
+
+/* ---- 首屏洞察条 ---- */
+
+.insight {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 16px;
+  align-items: center;
+  margin: 0 0 28px;
+  padding: 16px 20px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--line);
+  background: var(--surface);
+  animation: fade-up var(--dur-enter) var(--ease) 0.1s both;
+}
+
+.insight-warn {
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+}
+
+.insight-watch {
+  border-color: #e0cdb4;
+  background: #fbf5ee;
+}
+
+.insight-calm {
+  border-color: var(--line-soft);
+}
+
+.insight-kicker {
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: var(--ink-3);
+  white-space: nowrap;
+  padding: 3px 8px;
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.035);
+}
+
+.insight-warn .insight-kicker {
+  color: var(--accent);
+  background: rgba(193, 95, 60, 0.1);
+}
+
+.insight-text {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--ink-2);
+}
+
+.insight-go {
+  white-space: nowrap;
+  font: inherit;
+  font-size: 13px;
+  color: var(--accent);
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--accent-line);
+  padding: 2px 0;
+  cursor: pointer;
+  transition:
+    color var(--dur-hover) var(--ease),
+    border-color var(--dur-hover) var(--ease),
+    transform var(--dur-tap) var(--ease);
+}
+
+.insight-go:hover {
+  color: var(--ink);
+  border-color: var(--accent);
+}
+
+.insight-go:active {
+  transform: scale(0.97);
 }
 
 /* ---- 额度视角 ---- */
@@ -1403,6 +1479,14 @@ code {
   margin-bottom: 28px;
 }
 
+/* 「最该改的项目」卡要放完整项目名，窄屏下让它占满整行，
+   不和另外两张两列并排挤。 */
+@media (max-width: 900px) {
+  .waste-stats > *:nth-child(3) {
+    grid-column: 1 / -1;
+  }
+}
+
 .waste-verdict {
   font-variant-numeric: tabular-nums;
 }
@@ -1419,10 +1503,16 @@ code {
 .waste-severe  { color: var(--accent); }
 
 .waste-path {
-  font-size: 20px;
+  /* 比同级数字小一号：路径天生比数字长，20px 在窄屏两列下会被截成
+     「…/workspace/i…」，而项目名必须让用户认出来。 */
+  font-size: 16px;
+  line-height: 1.35;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  /* 项目名最长 …/workspace/DaiDai-AI-Translator 这类，
+     给足宽度，必要时让它占满整行而不是挤在半列里。 */
+  min-width: 0;
 }
 
 .waste-advice {
@@ -1540,7 +1630,7 @@ code {
 .rate-cell {
   padding: 18px 22px 18px 0;
   border-right: 1px solid var(--line-soft);
-  animation: fade-up 0.55s var(--ease) both;
+  animation: fade-up var(--dur-enter) var(--ease) both;
 }
 
 .rate-cell:last-child {
@@ -1648,7 +1738,7 @@ code {
   gap: 16px;
   padding: 12px 4px;
   border-bottom: 1px solid var(--line-soft);
-  animation: fade-up 0.5s var(--ease) both;
+  animation: fade-up var(--dur-enter) var(--ease) both;
   transition: background 0.15s;
 }
 
@@ -1722,7 +1812,7 @@ code {
   font-size: 12.5px;
   padding: 8px 4px;
   border-bottom: 1px solid var(--line-soft);
-  animation: fade-up 0.45s var(--ease) both;
+  animation: fade-up var(--dur-enter) var(--ease) both;
 }
 
 .event:hover {
@@ -1966,7 +2056,7 @@ code {
   background: var(--accent-soft);
   border: 1px solid var(--accent-line);
   border-radius: var(--radius-md);
-  animation: fade-up 0.6s var(--ease) both;
+  animation: fade-up var(--dur-enter) var(--ease) both;
 }
 
 .goal-emoji {
@@ -2095,7 +2185,7 @@ code {
 }
 
 .mall-band {
-  animation: fade-up 0.6s var(--ease) both;
+  animation: fade-up var(--dur-enter) var(--ease) both;
 }
 
 .band-head {
@@ -2224,7 +2314,7 @@ code {
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--radius-md);
-  animation: fade-up 0.65s var(--ease) both;
+  animation: fade-up var(--dur-enter) var(--ease) both;
 }
 
 .scan-flow-head {
@@ -2453,7 +2543,7 @@ code {
   gap: 8px;
   font-size: 12.5px;
   color: var(--ink-3);
-  animation: fade-up 0.5s var(--ease) both;
+  animation: fade-up var(--dur-enter) var(--ease) both;
   transition: color 0.3s;
 }
 

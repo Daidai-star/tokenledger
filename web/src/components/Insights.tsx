@@ -142,6 +142,98 @@ export function ProjectSection({ rows }: { rows: ProjectRow[] }) {
 }
 
 /**
+ * 首屏洞察条：把「最该知道的一件事」提前。
+ *
+ * 首屏原本是六个总量数字——13.34B token、$2,604、94.88% 缓存命中。
+ * 这些都对，但看完不知道该干什么。用户真正想知道的只有一句：
+ * **我这儿有什么问题，改哪里。**
+ *
+ * 所以这里只挑**一条**，按「能省下的钱」排序，不做列表。
+ * 一条给一个结论，比六条给六个数字有用。
+ *
+ * 挑选顺序刻意如此：
+ *  1. 会话碎片化最严重（影响面最大，改法最简单）
+ *  2. 否则有超线会话（说明吃钱在少数会话上）
+ *  3. 否则本月会超（订阅用户最关心）
+ *  4. 都没有就说做得不错——别硬编问题。
+ */
+export function InsightStrip({
+  waste,
+  guard,
+  pace,
+  costUsd,
+}: {
+  waste: WasteData;
+  guard: GuardData;
+  pace: PaceData;
+  costUsd: number;
+}) {
+  type Insight = {
+    tone: "warn" | "watch" | "calm";
+    kicker: string;
+    text: string;
+    anchor: string;
+  };
+
+  let insight: Insight | null = null;
+
+  if (waste.projects > 0 && waste.fragmentation >= 2) {
+    insight = {
+      tone: waste.fragmentation >= 3 ? "warn" : "watch",
+      kicker: "会话切碎",
+      text: `平均每个项目开了 ${waste.fragmentation.toFixed(1)} 个会话，每次开工都要重新喂一遍上下文——这部分学费合计 ${fmtCost(waste.total_waste_usd)}。`,
+      anchor: "看浪费诊断",
+    };
+  } else if (guard.over.length > 0) {
+    insight = {
+      tone: "watch",
+      kicker: "少数会话吃掉大头",
+      text: `${guard.over.length} 个会话超过 ${fmtCost(guard.warnUsd)}，合计 ${fmtCost(guard.totalOverUsd)}；最贵一单 ${fmtCost(guard.maxUsd)}，是中位数的 ${Math.round(guard.spread)} 倍。`,
+      anchor: "看预算护栏",
+    };
+  } else if (!pace.complete && pace.projectedUsd > pace.spentUsd * 1.2 && pace.spentUsd > 0) {
+    insight = {
+      tone: "watch",
+      kicker: "本月可能超",
+      text: `${pace.daysElapsed} 天花了 ${fmtCost(pace.spentUsd)}，按这个速度月底约 ${fmtCost(pace.projectedUsd)}。`,
+      anchor: "看额度视角",
+    };
+  } else if (waste.projects > 0) {
+    insight = {
+      tone: "calm",
+      kicker: "用法健康",
+      text: `会话与项目基本一一对应，冷启动学费只有 ${fmtCost(waste.total_waste_usd)}${costUsd > 0 ? `，占累计成本的 ${((waste.total_waste_usd / costUsd) * 100).toFixed(1)}%` : ""}。保持现在的习惯。`,
+      anchor: "看浪费诊断",
+    };
+  }
+
+  if (!insight) return null;
+
+  const target = () => {
+    const map: Record<string, string> = {
+      看浪费诊断: "浪费诊断",
+      看预算护栏: "预算护栏",
+      看额度视角: "额度够用吗",
+    };
+    const label = map[insight.anchor];
+    const el = [...document.querySelectorAll("section.section")].find(
+      (s) => (s.querySelector("h2")?.textContent || "").trim() === label,
+    );
+    el?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+
+  return (
+    <div className={`insight insight-${insight.tone}`}>
+      <span className="insight-kicker">{insight.kicker}</span>
+      <p className="insight-text">{insight.text}</p>
+      <button className="insight-go" onClick={target}>
+        {insight.anchor}
+      </button>
+    </div>
+  );
+}
+
+/**
  * 订阅额度视角：按当前速度，额度够用吗。
  *
  * 这是调研里用户最困惑的地方。厂商给的 $X 订阅额度和「API 等价成本」

@@ -13,6 +13,7 @@ import {
 import {
   ColdStartSection,
   GuardSection,
+  InsightStrip,
   PaceSection,
   ProjectSection,
   WasteSection,
@@ -578,6 +579,13 @@ export default function App() {
           delay={300}
         />
       </section>
+
+      <InsightStrip
+        waste={data.waste}
+        guard={data.guard}
+        pace={data.pace}
+        costUsd={o.cost_usd}
+      />
 
       <section className="section">
         <div className="section-head">
