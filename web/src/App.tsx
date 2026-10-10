@@ -10,7 +10,13 @@ import {
   ToolModelMatrix,
   TrendChart,
 } from "./components/Charts";
-import { ColdStartSection, GuardSection, ProjectSection, WasteSection } from "./components/Insights";
+import {
+  ColdStartSection,
+  GuardSection,
+  PaceSection,
+  ProjectSection,
+  WasteSection,
+} from "./components/Insights";
 import { MallSection } from "./components/Mall";
 import ScanFlow from "./components/ScanFlow";
 import { fetchDashboard, triggerReset, triggerScan } from "./api";
@@ -622,6 +628,8 @@ export default function App() {
       <WasteSection data={data.waste} />
 
       <GuardSection data={data.guard} />
+
+      <PaceSection data={data.pace} />
 
       <MallSection
         costUsd={o.cost_usd}

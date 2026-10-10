@@ -420,6 +420,8 @@ export const mytool = new Collector({
 | `GET /api/projects` | 按 cwd 聚合的项目账单（见下节） |
 | `GET /api/cold-start` | 缓存冷启动诊断（见下节） |
 | `GET /api/waste` | 浪费诊断：会话碎片化与可执行建议（见下节） |
+| `GET /api/guard` | 预算护栏：单会话成本分布与超线会话 |
+| `GET /api/pace` | 额度视角：按当前速度投影到月末 |
 | `GET /api/sessions` `?events` | 会话 / 事件流 |
 | `GET /api/profile` | 档案（streak、强度） |
 | `GET /api/profiles/:tool` | 单工具账号信息 |

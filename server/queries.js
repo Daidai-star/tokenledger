@@ -612,6 +612,77 @@ export class Queries {
     };
   }
 
+  /**
+   * 订阅额度视角：按当前速度，额度够用吗。
+   *
+   * 调研里用户最困惑的就是「$321 是不是要收我钱」——
+   * 厂商给的订阅额度和「API 等价成本」是两个东西。
+   * 累计数字回答不了这个问题，它只告诉你已经花了多少。
+   * 这里做的是**投影**：把已发生用量按当前速率外推到月末。
+   *
+   * 口径决定：
+   *  - 按自然月统计，因为订阅额度是按月重置的。
+   *  - 速率分母用「本月已过天数」而不是「全部活跃天数」——
+   *    用户可能上个月才开始用，用全部活跃天数会把速率算低、投影偏保守。
+   *  - 投影 = 日速率 × 当月总天数，不是「日均 × 已过天数」。
+   *  - 月中调用时 complete = false，界面必须标出这是估算。
+   */
+  pace(q = {}) {
+    const now = Number(q.now) || Date.now();
+    const d = new Date(now);
+    const year = d.getUTCFullYear();
+    const month = d.getUTCMonth(); // 0-11
+    const daysInMonth = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+    const daysElapsed = d.getUTCDate();
+    const monthStart = Date.UTC(year, month, 1);
+    const nextMonth = Date.UTC(year, month + 1, 1);
+
+    const rows = this.store
+      .prep(
+        `SELECT tool,
+                COUNT(*) AS requests,
+                SUM(total_tokens) AS total_tokens,
+                SUM(COALESCE(cost_usd, 0)) AS cost_usd
+         FROM usage_events
+         WHERE ts >= ? AND ts < ?
+         GROUP BY tool
+         ORDER BY cost_usd DESC`,
+      )
+      .all(monthStart, nextMonth);
+
+    const byTool = rows.map((r) => ({
+      tool: r.tool,
+      requests: r.requests,
+      total_tokens: r.total_tokens,
+      cost_usd: round(r.cost_usd),
+      share: 0, // 下面按总额回填，避免二次查询
+    }));
+
+    const spentUsd = round(rows.reduce((n, r) => n + r.cost_usd, 0));
+    for (const t of byTool) {
+      t.share = spentUsd > 0 ? roundTo((t.cost_usd / spentUsd) * 100, 1) : 0;
+    }
+
+    const dailyUsd = daysElapsed > 0 ? roundTo(spentUsd / daysElapsed, 2) : 0;
+    const projectedUsd = round(dailyUsd * daysInMonth);
+
+    return {
+      year,
+      /** 1-12 */
+      month: month + 1,
+      monthLabel: `${year} 年 ${month + 1} 月`,
+      spentUsd,
+      dailyUsd,
+      projectedUsd,
+      daysElapsed,
+      daysInMonth,
+      /** 本月是否已走完——false 时 projectedUsd 是外推估算 */
+      complete: daysElapsed >= daysInMonth,
+      byTool,
+      requests: rows.reduce((n, r) => n + r.requests, 0),
+    };
+  }
+
   /** 星期分布（0=周日） */
   weekday(q = {}) {
     const w = this.#eventWhere(q);

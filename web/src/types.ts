@@ -288,6 +288,33 @@ export interface GuardData {
   warnFloor: number;
 }
 
+export interface PaceToolRow {
+  tool: string;
+  requests: number;
+  total_tokens: number;
+  cost_usd: number;
+  /** 占当月成本的百分比 */
+  share: number;
+}
+
+export interface PaceData {
+  year: number;
+  month: number;
+  monthLabel: string;
+  /** 当月截至今天已花 */
+  spentUsd: number;
+  /** 日均速率 */
+  dailyUsd: number;
+  /** 按当前速率投影到月末 */
+  projectedUsd: number;
+  daysElapsed: number;
+  daysInMonth: number;
+  /** 本月是否走完；false 时 projectedUsd 是外推估算 */
+  complete: boolean;
+  byTool: PaceToolRow[];
+  requests: number;
+}
+
 export interface ScanRun {
   id: number;
   started_at: number;
@@ -333,6 +360,7 @@ export interface Dashboard {
   coldStart: ColdStartData;
   waste: WasteData;
   guard: GuardData;
+  pace: PaceData;
   sessions: SessionRow[];
   recentEvents: EventRow[];
   lastScan: ScanRun | null;

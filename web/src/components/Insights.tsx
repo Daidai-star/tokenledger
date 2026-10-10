@@ -1,6 +1,6 @@
 import { RankBars, TrendChart } from "./Charts";
 import { fmtCost, fmtInt, shortPath, tokens } from "../format";
-import type { ColdStartData, GuardData, ProjectRow, WasteData } from "../types";
+import type { ColdStartData, GuardData, PaceData, ProjectRow, WasteData } from "../types";
 
 /**
  * 项目账单：钱花在哪个项目上。
@@ -135,6 +135,157 @@ export function ProjectSection({ rows }: { rows: ProjectRow[] }) {
           {rows.length > 12 && (
             <div className="peak-note">另有 {fmtInt(rows.length - 12)} 个项目未列出。</div>
           )}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+/**
+ * 订阅额度视角：按当前速度，额度够用吗。
+ *
+ * 这是调研里用户最困惑的地方。厂商给的 $X 订阅额度和「API 等价成本」
+ * 是两个东西，而累计数字回答不了「够用吗」——它只告诉你已经花了多少。
+ * 所以这里做的是**投影**：按本月日均速率外推到月末。
+ *
+ * 诚实标注：月中时投影是估算，会写明「按前 N 天速率外推」。
+ * 定价随时会变，估算的口径照实说，不伪装成账单。
+ */
+export function PaceSection({ data }: { data: PaceData }) {
+  if (!data.requests || data.spentUsd <= 0) {
+    return (
+      <section className="section">
+        <div className="section-head">
+          <h2>额度够用吗</h2>
+          <span className="sub">按当前速度投影到月末</span>
+        </div>
+        <div className="panel">
+          <div className="empty-hint">{data.monthLabel}还没有用量记录</div>
+        </div>
+      </section>
+    );
+  }
+
+  // 时间轴进度条：已过天数占比，与花费占比对比，一眼看出「花得快不快」
+  const timePct = (data.daysElapsed / data.daysInMonth) * 100;
+  // 投影 / 已花 的比值：> 1 说明还没过完就已经超了投影的这些
+  const burnRatio = data.spentUsd > 0 ? data.projectedUsd / data.spentUsd : 0;
+  // 相对时间进度的花费进度
+  const spendPct = Math.min(100, (data.spentUsd / data.projectedUsd) * 100);
+
+  return (
+    <section className="section pace">
+      <div className="section-head">
+        <div>
+          <h2>额度够用吗</h2>
+          <div className="sub">
+            {data.monthLabel} · 按前 {data.daysElapsed} 天的速率外推到月末
+          </div>
+        </div>
+      </div>
+
+      <div className="stat-row pace-stats">
+        <div className="stat">
+          <div className="k">本月已花</div>
+          <div className="v">{fmtCost(data.spentUsd)}</div>
+          <div className="s">
+            {data.daysElapsed}/{data.daysInMonth} 天 · 日均 {fmtCost(data.dailyUsd)}
+          </div>
+        </div>
+        <div className="stat">
+          <div className="k">
+            {data.complete ? "本月合计" : "预计月底"}
+          </div>
+          <div className="v pace-projected">{fmtCost(data.projectedUsd)}</div>
+          <div className="s">
+            {data.complete ? "本月已走完，是实际值" : "按当前速率的估算，不是账单"}
+          </div>
+        </div>
+        <div className="stat">
+          <div className="k">加速倍数</div>
+          <div className="v">
+            {burnRatio.toFixed(1)}
+            <span className="unit">×</span>
+          </div>
+          <div className="s">月底相对今天还要再花 {fmtCost(data.projectedUsd - data.spentUsd)}</div>
+        </div>
+      </div>
+
+      <div className="panel">
+        <div className="section-head" style={{ marginBottom: 16 }}>
+          <h2 style={{ fontSize: 16 }}>时间 vs 花费</h2>
+          <span className="sub">条形长度相对投影总额——花费跑在时间前面就是用超的信号</span>
+        </div>
+
+        <div className="pace-bars">
+          <div className="pace-bar-row">
+            <span className="pace-bar-k">时间</span>
+            <div className="pace-track">
+              <div className="pace-fill pace-fill-time" style={{ width: `${timePct}%` }} />
+            </div>
+            <span className="pace-bar-v">
+              {data.daysElapsed}/{data.daysInMonth} 天
+            </span>
+          </div>
+          <div className="pace-bar-row">
+            <span className="pace-bar-k">已花</span>
+            <div className="pace-track">
+              <div className="pace-fill pace-fill-spend" style={{ width: `${spendPct}%` }} />
+            </div>
+            <span className="pace-bar-v">{fmtCost(data.spentUsd)}</span>
+          </div>
+        </div>
+
+        <div className="pace-legend">
+          两条条形都以「{data.complete ? "本月合计" : "预计月底"} {fmtCost(data.projectedUsd)}」为满格基准。
+          花费条越过时间条，就是这份用量用得比月份进度更快。
+        </div>
+
+        {Math.abs(spendPct - timePct) > 5 ? (
+          spendPct > timePct ? (
+          <div className="pace-warn">
+            花费进度比时间快 {Math.round(spendPct - timePct)} 个百分点——
+            按这个速度，月底会明显超过今天已经花掉的 {fmtCost(data.spentUsd)}。
+          </div>
+          ) : (
+            <div className="pace-ok">
+              花费进度比时间慢 {Math.round(timePct - spendPct)} 个百分点——
+              按这个速度，月底会低于今天已经花掉的 {fmtCost(data.spentUsd)}。
+            </div>
+          )
+        ) : (
+          <div className="pace-ok">
+            花费与时间基本同步——这个月的用量节奏和你过去的习惯一致。
+          </div>
+        )}
+
+        {data.byTool.length > 0 && (
+          <>
+            <div className="section-head pace-sub" style={{ margin: "26px 0 14px" }}>
+              <h2 style={{ fontSize: 16 }}>本月按工具</h2>
+              <span className="sub">哪个订阅在吃额度</span>
+            </div>
+            <div className="pace-tools">
+              {data.byTool.map((t) => (
+                <div key={t.tool} className="pace-tool">
+                  <span className="pace-tool-k">{t.tool}</span>
+                  <div className="pace-track">
+                    <div
+                      className="pace-fill pace-fill-tool"
+                      style={{ width: `${t.share}%` }}
+                    />
+                  </div>
+                  <span className="pace-tool-v">{fmtCost(t.cost_usd)}</span>
+                  <span className="pace-tool-s">{t.share}%</span>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+
+        <div className="peak-note">
+          这里算的是 API 等价成本，不是厂商账单。订阅用户请以「额度够不够用」为准——
+          你实际付的是订阅费，这张图告诉你的是这份用量值多少。
         </div>
       </div>
     </section>
