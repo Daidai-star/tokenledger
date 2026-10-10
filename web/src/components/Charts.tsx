@@ -116,6 +116,10 @@ export function TrendChart({
             stroke={s.color}
             strokeWidth={1.25}
             strokeLinejoin="round"
+            /* dasharray + dashoffset 动画让折线像笔迹一样画出来。
+               1400 是覆盖整条曲线的上限长度，够长就不会提前露尾。 */
+            strokeDasharray="1400"
+            style={{ animationDelay: `${i * 90}ms` }}
             className="trend-area"
           />
         ))}

@@ -262,6 +262,32 @@ export interface WasteData {
   advice: WasteAdvice[];
 }
 
+/** 超出提醒线的单个会话 */
+export interface GuardOverSession {
+  session_id: string;
+  tool: string;
+  cwd: string | null;
+  started_at: number;
+  requests: number;
+  total_tokens: number;
+  cost_usd: number;
+}
+
+export interface GuardData {
+  sessions: number;
+  /** 中位数单会话成本——多数会话的真实量级 */
+  medianUsd: number;
+  /** 提醒线 = max($5 下限, P90)，跟着用户自己的历史走 */
+  warnUsd: number;
+  p90Usd: number;
+  maxUsd: number;
+  /** 最高单会话是中位数的多少倍 */
+  spread: number;
+  over: GuardOverSession[];
+  totalOverUsd: number;
+  warnFloor: number;
+}
+
 export interface ScanRun {
   id: number;
   started_at: number;
@@ -306,6 +332,7 @@ export interface Dashboard {
   projects: ProjectRow[];
   coldStart: ColdStartData;
   waste: WasteData;
+  guard: GuardData;
   sessions: SessionRow[];
   recentEvents: EventRow[];
   lastScan: ScanRun | null;

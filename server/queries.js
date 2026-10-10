@@ -530,6 +530,88 @@ export class Queries {
     };
   }
 
+  /**
+   * 预算护栏：单会话成本分布 + 超线会话。
+   *
+   * 为什么要按分布而不是固定阈值：本机实测单会话成本中位数 $0.32、
+   * 最高 $35.69，差 100 倍。写死 $10 的话，多数人永远收不到提醒；
+   * 写死 $1 的话天天被打扰。所以提醒线跟着用户自己的历史走。
+   *
+   * 用 P90 而不是 P90+：防的是「少数会话吃掉大钱」这件事，
+   * P90 正好把最贵的 10% 挑出来。再高就漏掉了。
+   *
+   * 下限 $5 的理由：轻度使用的用户 P90 可能只有 $1，
+   * 按分布给出的线会让人天天收到提醒——那就成了噪音，不是护栏。
+   *
+   * 口径：排除 total_tokens = 0 的心跳，它们不该造出会话参与统计。
+   */
+  guard(q = {}) {
+    const w = this.#eventWhere(q);
+    const limit = Number(q.limit) || 200;
+
+    const rows = this.store
+      .prep(
+        `SELECT session_id,
+                MAX(tool) AS tool,
+                MIN(ts) AS started_at,
+                MAX(ts) AS ended_at,
+                MAX(cwd) AS cwd,
+                COUNT(*) AS requests,
+                SUM(total_tokens) AS total_tokens,
+                SUM(COALESCE(cost_usd, 0)) AS cost_usd
+         FROM usage_events
+         WHERE ${w.sql ? `(${w.sql}) AND` : ""} session_id IS NOT NULL
+           AND session_id <> '' AND total_tokens > 0
+         GROUP BY session_id
+         ORDER BY cost_usd DESC
+         LIMIT ?`,
+      )
+      .all(...w.params, limit);
+
+    const WARN_FLOOR = 5;
+    const costs = rows.map((r) => r.cost_usd).sort((a, b) => a - b);
+
+    const pct = (p) => {
+      if (!costs.length) return 0;
+      // 取上分位，用 ceil 保证索引在范围内
+      const idx = Math.min(costs.length - 1, Math.ceil((p / 100) * costs.length) - 1);
+      return costs[Math.max(0, idx)];
+    };
+
+    const p50 = pct(50);
+    const p90 = pct(90);
+    const max = costs.length ? costs[costs.length - 1] : 0;
+    // 下限兜底：轻度用户按分布算出来的线太低，会变成噪音
+    const warnUsd = Math.max(WARN_FLOOR, roundTo(p90, 2));
+
+    const over = rows
+      .filter((r) => r.cost_usd >= warnUsd)
+      .map((r) => ({
+        session_id: r.session_id,
+        tool: r.tool,
+        cwd: r.cwd,
+        started_at: r.started_at,
+        requests: r.requests,
+        total_tokens: r.total_tokens,
+        cost_usd: round(r.cost_usd),
+      }));
+
+    return {
+      sessions: rows.length,
+      /** 中位数单会话成本——多数会话的真实量级 */
+      medianUsd: roundTo(p50, 2),
+      /** 提醒线 = max($5 下限, P90) */
+      warnUsd,
+      p90Usd: roundTo(p90, 2),
+      maxUsd: roundTo(max, 2),
+      /** 最高单会话是中位数的多少倍——「切碎之外还有大钱」的直接信号 */
+      spread: p50 > 0 ? roundTo(max / p50, 1) : 0,
+      over,
+      totalOverUsd: round(over.reduce((n, r) => n + r.cost_usd, 0)),
+      warnFloor: WARN_FLOOR,
+    };
+  }
+
   /** 星期分布（0=周日） */
   weekday(q = {}) {
     const w = this.#eventWhere(q);

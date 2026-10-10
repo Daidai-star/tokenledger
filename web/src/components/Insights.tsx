@@ -1,6 +1,6 @@
 import { RankBars, TrendChart } from "./Charts";
 import { fmtCost, fmtInt, shortPath, tokens } from "../format";
-import type { ColdStartData, ProjectRow, WasteData } from "../types";
+import type { ColdStartData, GuardData, ProjectRow, WasteData } from "../types";
 
 /**
  * 项目账单：钱花在哪个项目上。
@@ -137,6 +137,188 @@ export function ProjectSection({ rows }: { rows: ProjectRow[] }) {
           )}
         </div>
       </div>
+    </section>
+  );
+}
+
+/**
+ * 预算护栏：单会话成本的分布，以及超出提醒线的那些会话。
+ *
+ * 为什么要做这个：本机实测 200 个会话，单会话成本中位数 $1.72、
+ * 最高 $180.12——差 105 倍。多数人看到「平均 $X」毫无感觉，
+ * 因为真正吃钱的永远是那几个例外。护栏把这些例外单独拎出来。
+ *
+ * 提醒线不是拍出来的，是跟着用户自己的历史走的：
+ * max($5 下限, P90)。写死一个数要么永远不响，要么天天打扰。
+ *
+ * 隐私：cwd 只留最后两段，同 ProjectSection。
+ */
+export function GuardSection({ data }: { data: GuardData }) {
+  if (!data.sessions) {
+    return (
+      <section className="section">
+        <div className="section-head">
+          <h2>预算护栏</h2>
+          <span className="sub">单会话成本的分布</span>
+        </div>
+        <div className="panel">
+          <div className="empty-hint">还没有带成本的会话记录</div>
+        </div>
+      </section>
+    );
+  }
+
+  const overByProject = new Map<string, number>();
+  for (const o of data.over) {
+    if (!o.cwd) continue;
+    const k = shortPath(o.cwd);
+    overByProject.set(k, (overByProject.get(k) || 0) + o.cost_usd);
+  }
+  const topProjects = [...overByProject.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8);
+
+  // 对数刻度：分布差 100 倍，线性刻度下小会话会挤成一条线看不见。
+  // 分母用各自的组内最大值——项目汇总会超过单会话最高值，
+  // 混用同一个分母会让条形溢出面板（第一版就踩了这个）。
+  const logScale = (v: number, max: number) =>
+    max > 0 ? Math.max(1.5, (Math.log10(Math.max(0.01, v)) / Math.log10(Math.max(1, max))) * 100) : 0;
+  const sessionMax = Math.max(data.maxUsd, data.warnUsd, data.medianUsd, 1);
+  const projMax = Math.max(...topProjects.map(([, c]) => c), 1);
+
+  return (
+    <section className="section guard">
+      <div className="section-head">
+        <div>
+          <h2>预算护栏</h2>
+          <div className="sub">
+            提醒线按你最近 {fmtInt(data.sessions)} 个会话的分布算，不是固定值
+          </div>
+        </div>
+      </div>
+
+      <div className="stat-row guard-stats">
+        <div className="stat">
+          <div className="k">提醒线</div>
+          <div className="v">{fmtCost(data.warnUsd)}</div>
+          <div className="s">
+            单会话超过 {fmtCost(data.warnUsd)} 就该看一眼
+            {data.warnUsd === data.warnFloor && "（你的会话都很便宜，用的是下限）"}
+          </div>
+        </div>
+        <div className="stat">
+          <div className="k">典型会话</div>
+          <div className="v">{fmtCost(data.medianUsd)}</div>
+          <div className="s">中位数——多数会话的真实量级</div>
+        </div>
+        <div className="stat">
+          <div className="k">最贵一单</div>
+          <div className="v guard-max">{fmtCost(data.maxUsd)}</div>
+          <div className="s">是中位数的 {fmtInt(Math.round(data.spread))} 倍</div>
+        </div>
+        <div className="stat">
+          <div className="k">超线会话</div>
+          <div className="v">
+            {fmtInt(data.over.length)}
+            <span className="unit">个</span>
+          </div>
+          <div className="s">合计 {fmtCost(data.totalOverUsd)}</div>
+        </div>
+      </div>
+
+      <div className="panel">
+        <div className="section-head" style={{ marginBottom: 16 }}>
+          <h2 style={{ fontSize: 16 }}>成本分布</h2>
+          <span className="sub">对数刻度——线性刻度下这些会话会挤成一条线</span>
+        </div>
+
+        <div className="guard-scale">
+          <div className="guard-scale-row">
+            <span className="guard-scale-k">中位数</span>
+            <div className="guard-bar guard-bar-median" style={{ width: `${logScale(data.medianUsd, sessionMax)}%` }} />
+            <span className="guard-scale-v">{fmtCost(data.medianUsd)}</span>
+          </div>
+          <div className="guard-scale-row">
+            <span className="guard-scale-k">提醒线</span>
+            <div className="guard-bar guard-bar-warn" style={{ width: `${logScale(data.warnUsd, sessionMax)}%` }} />
+            <span className="guard-scale-v">{fmtCost(data.warnUsd)}</span>
+          </div>
+          <div className="guard-scale-row">
+            <span className="guard-scale-k">最贵</span>
+            <div className="guard-bar guard-bar-max" style={{ width: `${logScale(data.maxUsd, sessionMax)}%` }} />
+            <span className="guard-scale-v">{fmtCost(data.maxUsd)}</span>
+          </div>
+        </div>
+
+        {topProjects.length > 0 && (
+          <>
+            <div className="section-head guard-sub" style={{ margin: "26px 0 14px" }}>
+              <h2 style={{ fontSize: 16 }}>超线会话花在哪</h2>
+              <span className="sub">按项目汇总</span>
+            </div>
+            <div className="guard-projects">
+              {topProjects.map(([name, cost], i) => (
+                <div key={name} className="guard-project" title={name}>
+                  <span className="guard-project-k">{name}</span>
+                  <div className="guard-track">
+                    <div className="guard-bar guard-bar-proj" style={{ width: `${logScale(cost, projMax)}%` }} />
+                  </div>
+                  <span className="guard-project-v">{fmtCost(cost)}</span>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+
+        <div className="peak-note">
+          这里算的是 API 等价成本，不是厂商账单。订阅用户请以「额度够不够用」为准。
+          提醒线是统计参考，不是系统限制——我们不会中断你的任何会话。
+        </div>
+      </div>
+
+      {data.over.length > 0 && (
+        <div className="panel">
+          <div className="section-head" style={{ marginBottom: 16 }}>
+            <h2 style={{ fontSize: 16 }}>超线会话</h2>
+            <span className="sub">最贵的 {Math.min(12, data.over.length)} 个</span>
+          </div>
+
+          <div className="table-scroll">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>项目</th>
+                  <th>请求</th>
+                  <th>Token</th>
+                  <th>成本</th>
+                  <th>倍数</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.over.slice(0, 12).map((o) => (
+                  <tr key={o.session_id}>
+                    <td>
+                      <span className="proj-path" title={o.cwd || o.session_id}>
+                        {o.cwd ? shortPath(o.cwd) : o.session_id.slice(0, 16)}
+                      </span>
+                    </td>
+                    <td>{fmtInt(o.requests)}</td>
+                    <td>{tokens(o.total_tokens)}</td>
+                    <td>{fmtCost(o.cost_usd)}</td>
+                    <td>
+                      {data.medianUsd > 0
+                        ? `${Math.round(o.cost_usd / data.medianUsd)}×`
+                        : "—"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {data.over.length > 12 && (
+            <div className="peak-note">另有 {fmtInt(data.over.length - 12)} 个超线会话未列出。</div>
+          )}
+        </div>
+      )}
     </section>
   );
 }

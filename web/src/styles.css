@@ -53,6 +53,25 @@
 
   --ease: cubic-bezier(0.22, 1, 0.36, 1);
   --ease-io: cubic-bezier(0.65, 0, 0.35, 1);
+
+  /* ---- 动效分层 ----
+     数值取自 docs/research/motion-design-playbook.md 的调研基线，
+     按「反馈的紧急程度」分层，而不是全局一个时长：
+       微反馈 100-180ms  按钮 hover / 按下，必须即时
+       状态   140-240ms  颜色、图标、小块变化
+       浮层   160-240ms  菜单、toast，带 4-8px 位移
+       入场   220-360ms  区块进场，配合 stagger 30-60ms
+     退场一律比入场快约 25%——离开不需要被看清。 */
+  --dur-tap: 120ms;
+  --dur-hover: 160ms;
+  --dur-state: 200ms;
+  --dur-pop: 220ms;
+  --dur-enter: 300ms;
+  /* 退场更快：cubic-bezier 前段陡、后段长，视觉上「果断收走」 */
+  --ease-exit: cubic-bezier(0.4, 0, 1, 1);
+  /* stagger 步长：首屏少量内容 40ms，密集列表 24ms */
+  --stagger: 40ms;
+  --stagger-fast: 24ms;
 }
 
 * {
@@ -1156,6 +1175,91 @@ code {
   overflow-x: auto;
   margin-inline: -4px;
   padding-inline: 4px;
+}
+
+/* ---- 预算护栏 ---- */
+
+.guard-stats {
+  margin-bottom: 28px;
+}
+
+.guard-max {
+  color: var(--accent);
+}
+
+.guard-scale {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.guard-scale-row,
+.guard-project {
+  display: grid;
+  /* 项目名要放得下 …/workspace/image 这样的两段路径，
+     64px 会截成「…/works…」；给足 150px 并允许省略。 */
+  grid-template-columns: 150px minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: center;
+}
+
+.guard-scale-row {
+  grid-template-columns: 60px minmax(0, 1fr) auto;
+}
+
+.guard-scale-k,
+.guard-project-k {
+  font-size: 12px;
+  color: var(--ink-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.guard-scale-v,
+.guard-project-v {
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+  text-align: right;
+  white-space: nowrap;
+  /* 金额永远完整显示，不被条形压住也不换行 */
+  min-width: 72px;
+}
+
+/* 条形从 0 长出来：宽度变化触发布局，但条数少、面积小，代价可接受 */
+.guard-track {
+  min-width: 0;
+}
+
+.guard-bar {
+  height: 10px;
+  border-radius: 2px;
+  transform-origin: left center;
+  animation: bar-grow var(--dur-enter) var(--ease) both;
+  min-width: 2px;
+}
+
+.guard-bar-median { background: var(--c-sage); }
+.guard-bar-warn   { background: #b07a3c; }
+.guard-bar-max    { background: var(--accent); }
+.guard-bar-proj   { background: var(--accent); opacity: 0.75; height: 8px; }
+
+@keyframes bar-grow {
+  from {
+    transform: scaleX(0);
+  }
+}
+
+.guard-sub {
+  border-top: 1px solid var(--line-soft);
+  padding-top: 22px;
+}
+
+.guard-projects {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 
 /* ---- 浪费诊断 ---- */
@@ -2342,7 +2446,7 @@ code {
 @keyframes fade-up {
   from {
     opacity: 0;
-    transform: translateY(8px);
+    transform: translateY(6px);
   }
 }
 
@@ -2394,4 +2498,85 @@ code {
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+/* ================================================================
+   交互反馈层
+   调研结论：优先用 transform 和 opacity（可合成，不触发重排）。
+   box-shadow 会触发重绘，只在小面积、低频率的微反馈上用。
+   ================================================================ */
+
+/* 按钮：按下时轻微缩小 + 变暗，给出「按下去了」的物理感 */
+.btn {
+  transition:
+    transform var(--dur-tap) var(--ease),
+    background var(--dur-hover) var(--ease),
+    border-color var(--dur-hover) var(--ease),
+    color var(--dur-hover) var(--ease);
+}
+
+.btn:hover {
+  transform: translateY(-1px);
+}
+
+.btn:active {
+  /* 按下时缩回原位并压暗——这是「触感」的主要来源 */
+  transform: translateY(0) scale(0.97);
+  transition-duration: var(--dur-tap);
+}
+
+/* 排行行 / 可点行：整行可点时给出明确的 hover 反馈 */
+.rank-row,
+.event,
+.mall-row {
+  transition:
+    background var(--dur-hover) var(--ease),
+    transform var(--dur-hover) var(--ease);
+}
+
+.rank-row:hover,
+.event:hover {
+  transform: translateX(2px);
+}
+
+/* 键盘可达性：focus 必须有清楚可见的样式，不能只靠 hover */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+/* 区块进场：改成调研建议的 300ms + 6px 位移。
+   原来的 0.6-0.7s 偏慢，用户会等得不舒服。 */
+.section {
+  animation: fade-up var(--dur-enter) var(--ease) both;
+}
+
+/* 指标卡的 stagger：nth-child 递增延迟，读起来有顺序感 */
+.stat-row > * {
+  animation: fade-up 260ms var(--ease) both;
+}
+
+.stat-row > *:nth-child(1) { animation-delay: 0ms; }
+.stat-row > *:nth-child(2) { animation-delay: var(--stagger); }
+.stat-row > *:nth-child(3) { animation-delay: calc(var(--stagger) * 2); }
+.stat-row > *:nth-child(4) { animation-delay: calc(var(--stagger) * 3); }
+.stat-row > *:nth-child(5) { animation-delay: calc(var(--stagger) * 4); }
+
+/* 图表线条：让折线「画出来」而不是直接出现 */
+svg path[stroke]:not([stroke="none"]) {
+  animation: line-draw 900ms var(--ease) both;
+}
+
+@keyframes line-draw {
+  from {
+    stroke-dashoffset: var(--dash, 1200);
+  }
+}
+
+/* 悬停时的数值强调：告诉用户「这个数会点开」 */
+.stat:hover .v,
+.rank-row:hover .rank-value {
+  color: var(--accent);
+  transition: color var(--dur-state) var(--ease);
 }
