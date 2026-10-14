@@ -1,11 +1,20 @@
 /** 格式化工具 */
 
+/**
+ * 去掉多余的尾随零。
+ *
+ * 轴刻度是 niceMax 算出来的整数（250M / 500M / 1B），走 toFixed(2) 会变成
+ * 「250.00M / 1.00B」——数值上没错，但读者会以为精度真的到小数点后两位。
+ * 坐标轴要的是「一眼看清刻度」，不是「显示全部有效数字」。
+ */
+const trim = (s: string): string => (s.includes(".") ? s.replace(/\.?0+$/, "") : s);
+
 export function fmtTokens(n: number): { value: string; unit: string } {
   const v = Number(n) || 0;
-  if (v >= 1e12) return { value: (v / 1e12).toFixed(2), unit: "T" };
-  if (v >= 1e9) return { value: (v / 1e9).toFixed(2), unit: "B" };
-  if (v >= 1e6) return { value: (v / 1e6).toFixed(2), unit: "M" };
-  if (v >= 1e3) return { value: (v / 1e3).toFixed(1), unit: "K" };
+  if (v >= 1e12) return { value: trim((v / 1e12).toFixed(2)), unit: "T" };
+  if (v >= 1e9) return { value: trim((v / 1e9).toFixed(2)), unit: "B" };
+  if (v >= 1e6) return { value: trim((v / 1e6).toFixed(2)), unit: "M" };
+  if (v >= 1e3) return { value: trim((v / 1e3).toFixed(1)), unit: "K" };
   return { value: String(Math.round(v)), unit: "" };
 }
 

@@ -334,9 +334,10 @@ function RateSection({ data }: { data: Dashboard }) {
             {tokens(cur.tokens)}
             <small>含缓存读</small>
           </div>
-          <div className="s">
-            输入 {tokens(cur.input)}（{hitPct}% 命中）· 输出 {tokens(cur.output)}
-          </div>
+          {/* 两行而不是一行：单行塞「输入 + 命中率 + 输出」会在窄格子里
+              把「· 输出 5.14M」挤到第二行，整行 hero 高度就不齐了。 */}
+          <div className="s">输入 {tokens(cur.input)} · 输出 {tokens(cur.output)}</div>
+          <div className="s dim">{hitPct}% 命中缓存</div>
         </div>
         <div className="rate-cell" style={{ animationDelay: "60ms" }}>
           <div className="k">本月成本</div>
@@ -687,6 +688,7 @@ export default function App() {
         : metric === "requests"
           ? o.requests || 0
           : o.total_tokens || 0;
+    const sumOf = (vs: number[]) => vs.reduce((a, b) => a + b, 0);
 
     if (focusModel) {
       const ms = data.modelSeries.find((m) => m.model === focusModel);
@@ -718,7 +720,14 @@ export default function App() {
         color: toolColor.get(tool) || "var(--ink-3)",
         values: labels.map((day) => pick(dayMap.get(day)?.[tool] ?? {})),
       }))
-      .filter((s) => s.values.some((v) => v > 0));
+      .filter((s) => s.values.some((v) => v > 0))
+      // 小的排上面（渲染顺序 = 堆叠顺序，最后一个画在最上层）。
+      //
+      // 本机 codex 占 93.1%、claude-code 只有 0.1%，差 1234 倍。按工具名字或
+      // 数据库顺序排的话，claude-code 会永远压在最底层，被 codex 完全盖住——
+      // 图例里四色俱全，图上只有一条线，95% 的画布只讲了一个故事。
+      // 小的放顶部才能至少露出颜色边缘。
+      .sort((a, b) => sumOf(a.values) - sumOf(b.values));
     return { labels, series };
   }, [data, metric, focusModel]);
 
@@ -826,6 +835,10 @@ export default function App() {
         costUsd={o.cost_usd}
       />
 
+      <Tab name="用量与成本" tab={tab}>
+        <RateSection data={data} />
+      </Tab>
+
       <Tab name="用量趋势" tab={tab}>
   <section className="section">
           <div className="section-head">
@@ -866,10 +879,6 @@ export default function App() {
             ))}
           </div>
         </section>
-      </Tab>
-
-      <Tab name="Token 速率" tab={tab}>
-        <RateSection data={data} />
       </Tab>
 
       <Tab name="项目账单" tab={tab}>

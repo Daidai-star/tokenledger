@@ -6,6 +6,28 @@ import { tokens, fmtCost, fmtInt, fmtDate, modelColor, bareModel } from "../form
  * 视觉遵循 Anthropic 的克制风格：细发丝线、低饱和填充、无强边框。
  */
 
+/**
+ * 把坐标轴上界抬到「好看的数」，让刻度落在整数上。
+ *
+ * 原来直接用 `v = (max / GRID) * i`，于是最大值 941.86M 会画出
+ * 941.86M / 706.39M / 470.93M / 235.46M 这种刻度——token 数给到小数点后两位
+ * 毫无意义，读者会以为自己看错了。
+ *
+ * 只取 1/2/4/8/10 这几个因子，是因为它们都能被 GRID=4 整除干净：
+ *   1B → 250M / 500M / 750M / 1B
+ *   2B → 500M / 1B / 1.5B / 2B
+ *   4B → 1B / 2B / 3B / 4B
+ * 取 5 的话会得到 1.25B 这种不整的刻度，所以不在候选里。
+ */
+function niceMax(v: number): number {
+  if (!Number.isFinite(v) || v <= 0) return 1;
+  const exp = Math.floor(Math.log10(v));
+  const base = 10 ** exp;
+  const f = v / base;
+  const nice = f <= 1 ? 1 : f <= 2 ? 2 : f <= 4 ? 4 : f <= 8 ? 8 : 10;
+  return nice * base;
+}
+
 /** 挂载即入场 */
 /**
  * 元素进入视口时返回 true，只触发一次。
@@ -96,7 +118,7 @@ export function TrendChart({
   for (const s of series) {
     cum.push(s.values.map((v, i) => (acc[i] = acc[i] + v)));
   }
-  const max = Math.max(1, ...acc);
+  const max = niceMax(Math.max(1, ...acc));
   const x = (i: number) => PAD.l + (n <= 1 ? iw / 2 : (i / (n - 1)) * iw);
   const y = (v: number) => PAD.t + ih - (v / max) * ih;
 
@@ -276,7 +298,7 @@ interface RankProps {
 
 /** 细线分隔的排行列表 */
 export function RankBars({ rows, format = tokens, onSelect, selected }: RankProps) {
-  const top = Math.max(1, ...rows.map((r) => r.value));
+  const top = niceMax(Math.max(1, ...rows.map((r) => r.value)));
   return (
     <div className="rank-list">
       {rows.map((r, i) => (
@@ -421,7 +443,7 @@ export function HourBars({
 }) {
   const { ref } = useInView<HTMLDivElement>();
   const vals = hours.map((h) => (h[valueKey] as number) || 0);
-  const max = Math.max(1, ...vals);
+  const max = niceMax(Math.max(1, ...vals));
 
   return (
     <div className="bars-24" ref={ref}>
@@ -457,7 +479,7 @@ export function ActivityHeatmap({ days }: { days: { day: string; tokens: number 
   if (!days.length) return <div className="empty-hint">暂无数据</div>;
 
   const byDay = new Map(days.map((d) => [d.day, d.tokens]));
-  const max = Math.max(1, ...days.map((d) => d.tokens));
+  const max = niceMax(Math.max(1, ...days.map((d) => d.tokens)));
 
   // 对齐到周一开头，整周填充
   const end = new Date(days[days.length - 1].day + "T00:00:00Z");
@@ -540,7 +562,7 @@ export function ToolModelMatrix({
   if (!rows.length) return <div className="empty-hint">暂无数据</div>;
   const tools = [...new Set(rows.map((r) => r.tool))];
   const models = [...new Set(rows.map((r) => r.model))];
-  const max = Math.max(1, ...rows.map((r) => r.total_tokens));
+  const max = niceMax(Math.max(1, ...rows.map((r) => r.total_tokens)));
   const lookup = new Map(rows.map((r) => [`${r.tool}|${r.model}`, r]));
 
   const totals = new Map<string, number>();
@@ -701,7 +723,7 @@ export function TokenBreakdown({
 /** 最近 N 秒的滚动速率条形图 */
 export function RateSpark({ recent }: { recent: { second: number; tokens: number }[] }) {
   if (!recent.length) return <div className="empty-hint">暂无速率数据</div>;
-  const max = Math.max(1, ...recent.map((r) => r.tokens));
+  const max = niceMax(Math.max(1, ...recent.map((r) => r.tokens)));
   return (
     <div className="rate-spark">
       {recent.map((r) => (

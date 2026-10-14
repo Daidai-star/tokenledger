@@ -1948,6 +1948,18 @@ code {
   margin-top: 2px;
 }
 
+/* 同一格里连续多行说明时，第二行往后压暗一点，避免读成两条并列信息 */
+.rate-cell .s.dim {
+  color: var(--ink-4);
+}
+
+/* hero 格子底部对齐：数字大小不一，不对齐底边会显得参差 */
+.rate-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
 /* 副标题里的强调数字：默认色太弱，提上来跟正文一致 */
 .rate-cell .s b {
   color: var(--ink-2);
