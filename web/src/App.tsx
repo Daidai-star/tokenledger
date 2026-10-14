@@ -388,7 +388,7 @@ function RateSection({ data }: { data: Dashboard }) {
         </div>
         <div className="rate-cell" style={{ animationDelay: "240ms" }}>
           <div className="k">单日最高</div>
-          <div style={{ fontFamily: "var(--font-serif)", fontSize: 19, marginTop: 5, letterSpacing: "-0.02em" }}>
+          <div style={{ fontFamily: "var(--font-serif)", fontSize: "var(--fs-title)", marginTop: 5, letterSpacing: "-0.02em" }}>
             {fmtDateFull(bestDay)}
           </div>
           <div className="s">
@@ -424,7 +424,7 @@ function RateSection({ data }: { data: Dashboard }) {
       <div className="grid-2">
         <div className="panel">
           <div className="section-head" style={{ marginBottom: 16 }}>
-            <h2 style={{ fontSize: 16 }}>每日用量</h2>
+            <h2 style={{ fontSize: "var(--fs-title)" }}>每日用量</h2>
             <span className="sub">
               {bestHour ? `高产时段 ${bestHour.hour}:00` : ""}
             </span>
@@ -462,7 +462,7 @@ function RateSection({ data }: { data: Dashboard }) {
 
         <div className="panel">
           <div className="section-head" style={{ marginBottom: 16 }}>
-            <h2 style={{ fontSize: 16 }}>每日成本</h2>
+            <h2 style={{ fontSize: "var(--fs-title)" }}>每日成本</h2>
             <span className="sub">API 等价成本，不是厂商账单</span>
           </div>
           <TrendChart
@@ -493,7 +493,7 @@ function RateSection({ data }: { data: Dashboard }) {
       <div className="grid-2">
         <div className="panel">
           <div className="section-head" style={{ marginBottom: 16 }}>
-            <h2 style={{ fontSize: 16 }}>各工具用量</h2>
+            <h2 style={{ fontSize: "var(--fs-title)" }}>各工具用量</h2>
             <span className="sub">按输入（含缓存读）排序</span>
           </div>
           <RankBars
@@ -528,7 +528,7 @@ function RateSection({ data }: { data: Dashboard }) {
 
         <div className="panel">
           <div className="section-head" style={{ marginBottom: 16 }}>
-            <h2 style={{ fontSize: 16 }}>时段分布</h2>
+            <h2 style={{ fontSize: "var(--fs-title)" }}>时段分布</h2>
             <span className="sub">活跃分钟内的生成 tok/min</span>
           </div>
           <HourBars hours={r.byHour} valueKey="genPerMinute" format={tokens} />
@@ -921,7 +921,7 @@ export default function App() {
           <div className="grid-2">
             <div className="panel">
               <div className="section-head" style={{ marginBottom: 18 }}>
-                <h2 style={{ fontSize: 16 }}>工具占比</h2>
+                <h2 style={{ fontSize: "var(--fs-title)" }}>工具占比</h2>
               </div>
               <DonutChart
                 slices={donutSlices}
@@ -931,7 +931,7 @@ export default function App() {
             </div>
             <div className="panel">
               <div className="section-head" style={{ marginBottom: 18 }}>
-                <h2 style={{ fontSize: 16 }}>Token 构成</h2>
+                <h2 style={{ fontSize: "var(--fs-title)" }}>Token 构成</h2>
               </div>
               <TokenBreakdown
                 input={o.input_tokens}
@@ -969,7 +969,7 @@ export default function App() {
             <div className="panel">
               <div className="section-head" style={{ marginBottom: 16 }}>
                 <div>
-                  <h2 style={{ fontSize: 16 }}>活跃热力图</h2>
+                  <h2 style={{ fontSize: "var(--fs-title)" }}>活跃热力图</h2>
                   <div className="sub">Codex profile 风格</div>
                 </div>
               </div>
@@ -981,7 +981,7 @@ export default function App() {
             <div className="panel">
               <div className="section-head" style={{ marginBottom: 16 }}>
                 <div>
-                  <h2 style={{ fontSize: 16 }}>时段活跃</h2>
+                  <h2 style={{ fontSize: "var(--fs-title)" }}>时段活跃</h2>
                   <div className="sub">本地时间 · 请求数</div>
                 </div>
               </div>
@@ -1016,14 +1016,14 @@ export default function App() {
           <div className="grid-2">
             <div className="panel">
               <div className="section-head" style={{ marginBottom: 18 }}>
-                <h2 style={{ fontSize: 16 }}>成本构成</h2>
+                <h2 style={{ fontSize: "var(--fs-title)" }}>成本构成</h2>
               </div>
               <CompositionBar items={costItems} />
             </div>
 
             <div className="panel">
               <div className="section-head" style={{ marginBottom: 18 }}>
-                <h2 style={{ fontSize: 16 }}>工具明细</h2>
+                <h2 style={{ fontSize: "var(--fs-title)" }}>工具明细</h2>
               </div>
               <table className="table">
                 <thead>
