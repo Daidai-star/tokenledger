@@ -155,13 +155,22 @@ export interface EventRow {
   cwd: string | null;
 }
 
+/**
+ * 生成速度（**主指标**）：输出 token / 活跃秒。
+ *
+ * 为什么不用 total_tokens：它的 94.6% 是缓存重读——agent 每轮把整个上下文
+ * 重发一遍，算进去就变成「每秒十几万 token」，那测的是上下文窗口有多大，
+ * 不是编码速度。本机中位数 247 tok/s，才是真实的生成吞吐。
+ */
 export interface RateOverall {
   /** 活跃秒数——速率按秒分桶 */
   activeSeconds: number;
-  /** @deprecated 旧字段名，值等于 activeSeconds */
-  activeMinutes: number;
   totalTokens: number;
   totalRequests: number;
+  /** 去重后的输出 token 合计 */
+  totalGen: number;
+  /** 去重后的上下文 token 合计（新鲜输入 + 缓存读 + 缓存写） */
+  totalCtx: number;
   avgPerSecond: number;
   medianPerSecond: number;
   p95PerSecond: number;
@@ -171,18 +180,44 @@ export interface RateOverall {
   activeHours: number;
 }
 
+/**
+ * 上下文吞吐（**次指标**）：新鲜输入 + 缓存读 + 缓存写，每秒。
+ * 量级由上下文长度决定，界面上必须和生成速度分开标注。
+ */
+export interface RateContext {
+  activeSeconds: number;
+  avgPerSecond: number;
+  medianPerSecond: number;
+  p95PerSecond: number;
+  peakPerSecond: number;
+}
+
+/** 按天/按小时/按工具的速率行。两个口径都给出，避免和首屏打架。 */
+export interface RateBucket {
+  tokens: number;
+  genTokens: number;
+  ctxTokens: number;
+  requests: number;
+  activeMinutes: number;
+  /** 生成速度：输出 token / 活跃分钟。与首屏主指标同口径。 */
+  genPerMinute: number;
+  /** 上下文吞吐：上下文 token / 活跃分钟。 */
+  ctxPerMinute: number;
+}
+
 export interface RateData {
   overall: RateOverall | null;
-  byDay: { day: string; tokens: number; requests: number; activeMinutes: number; perMinute: number }[];
-  byHour: { hour: number; tokens: number; requests: number; activeMinutes: number; perMinute: number }[];
-  byTool: { tool: string; tokens: number; requests: number; activeMinutes: number; perMinute: number }[];
+  context: RateContext | null;
+  byDay: (RateBucket & { day: string })[];
+  byHour: (RateBucket & { hour: number })[];
+  byTool: (RateBucket & { tool: string })[];
   recent: { second: number; tokens: number }[];
   summary: {
     activeSeconds: number;
-    activeMinutes: number;
     totalTokens: number;
-    avgPerSecond: number;
-    peakPerSecond: number;
+    genPerSecond: number;
+    peakGenPerSecond: number;
+    ctxPerSecond: number;
   };
 }
 

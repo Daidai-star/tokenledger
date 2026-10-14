@@ -1701,6 +1701,94 @@ code {
   margin-bottom: 26px;
 }
 
+/*
+ * 口径说明条：解释主指标为什么不含缓存读，并把次指标（上下文吞吐）
+ * 单独摆出来。两栏在窄屏折成上下，不能让 .caliber-side 被 min-content 撑破。
+ */
+.caliber-note {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+  gap: 26px;
+  align-items: start;
+  padding: 18px 20px;
+  margin-bottom: 26px;
+  background: var(--surface-2, rgba(0, 0, 0, 0.02));
+  border: 1px solid var(--line-soft);
+  border-radius: 4px;
+  animation: fade-up var(--dur-enter) var(--ease) 0.28s both;
+}
+
+.caliber-main b {
+  font-weight: 500;
+}
+
+.caliber-main p {
+  margin: 6px 0 0;
+  font-size: 13px;
+  line-height: 1.65;
+  color: var(--ink-2);
+}
+
+.caliber-main p b {
+  color: var(--ink);
+}
+
+.caliber-side {
+  padding-left: 22px;
+  border-left: 1px solid var(--line-soft);
+  min-width: 0;
+}
+
+.caliber-side .k {
+  font-size: 11px;
+  color: var(--ink-3);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.caliber-side .v {
+  font-family: var(--font-serif);
+  font-size: 22px;
+  letter-spacing: -0.02em;
+  margin-top: 3px;
+  line-height: 1.15;
+}
+
+.caliber-side .v small {
+  font-family: var(--font-sans);
+  font-size: 11px;
+  color: var(--ink-3);
+  letter-spacing: 0;
+  margin-left: 5px;
+}
+
+.caliber-side .s {
+  font-size: 11px;
+  color: var(--ink-3);
+  margin-top: 5px;
+  line-height: 1.5;
+}
+
+.caliber-side .s.dim {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--line-soft);
+}
+
+@media (max-width: 900px) {
+  .caliber-note {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 18px;
+  }
+
+  .caliber-side {
+    padding-left: 0;
+    padding-top: 16px;
+    border-left: 0;
+    border-top: 1px solid var(--line-soft);
+  }
+}
+
 .rate-cell {
   padding: 18px 22px 18px 0;
   border-right: 1px solid var(--line-soft);
@@ -2790,6 +2878,84 @@ code {
   }
 }
 
+/* ------------------------------------------------- 滚动入场（reveal.tsx） */
+
+/*
+ * 滚动触发的入场，和上面的挂载动画是两回事：
+ * 挂载动画在元素出现那一刻放完（切栏时所有区块同时挂载，于是同时放完，
+ * 用户往下滚时什么都看不到）；这里的 transition 由 IntersectionObserver
+ * 在元素**滚进视口**时才触发。
+ *
+ * 只动 opacity / transform，不触发重排。
+ */
+[data-reveal] {
+  opacity: 0;
+  transform: translate3d(0, var(--reveal-dist, 14px), 0);
+  transition:
+    opacity var(--dur-enter) var(--ease),
+    transform var(--dur-enter) var(--ease);
+  transition-delay: var(--reveal-delay, 0ms);
+  will-change: opacity, transform;
+}
+
+[data-reveal][data-in] {
+  opacity: 1;
+  transform: translate3d(0, 0, 0);
+}
+
+/*
+ * 容器级 stagger：容器入视口后，直接子元素按 --reveal-i 依次点亮。
+ * nth-child 用 :where() 保持 0 特异度，避免盖住各区块自己的规则。
+ * 超过 --reveal-max 的子元素不再累加延迟，否则长列表的尾巴要等很久。
+ */
+[data-reveal-group] > * {
+  opacity: 0;
+  transform: translate3d(0, var(--reveal-dist, 12px), 0);
+  transition:
+    opacity var(--dur-enter) var(--ease),
+    transform var(--dur-enter) var(--ease);
+  transition-delay: calc(
+    min(var(--reveal-i, 0), var(--reveal-max, 8)) * var(--reveal-step, 40ms)
+  );
+  will-change: opacity, transform;
+}
+
+[data-reveal-group][data-in] > * {
+  opacity: 1;
+  transform: translate3d(0, 0, 0);
+}
+
+[data-reveal-group] > :nth-child(1) { --reveal-i: 0; }
+[data-reveal-group] > :nth-child(2) { --reveal-i: 1; }
+[data-reveal-group] > :nth-child(3) { --reveal-i: 2; }
+[data-reveal-group] > :nth-child(4) { --reveal-i: 3; }
+[data-reveal-group] > :nth-child(5) { --reveal-i: 4; }
+[data-reveal-group] > :nth-child(6) { --reveal-i: 5; }
+[data-reveal-group] > :nth-child(7) { --reveal-i: 6; }
+[data-reveal-group] > :nth-child(8) { --reveal-i: 7; }
+
+/*
+ * 无障碍与降级：
+ * - 用户要求减少动效 → 不位移，只淡入
+ * - 打印 / 强制颜色模式下不需要动效，直接显示终态
+ */
+@media (prefers-reduced-motion: reduce) {
+  [data-reveal],
+  [data-reveal-group] > * {
+    transform: none;
+    transition-duration: 1ms;
+    transition-delay: 0ms;
+  }
+}
+
+@media print {
+  [data-reveal],
+  [data-reveal-group] > * {
+    opacity: 1;
+    transform: none;
+  }
+}
+
 /* ---------------------------------------------------------- 响应式 */
 
 @media (max-width: 900px) {
@@ -2895,6 +3061,24 @@ code {
 .stat-row > *:nth-child(3) { animation-delay: calc(var(--stagger) * 2); }
 .stat-row > *:nth-child(4) { animation-delay: calc(var(--stagger) * 3); }
 .stat-row > *:nth-child(5) { animation-delay: calc(var(--stagger) * 4); }
+
+/*
+ * Tab 里的区块由 `reveal.tsx` 的 Reveal 包裹（滚动触发），
+ * 不再需要自己的挂载动画——挂载动画会在切栏那一刻全部放完，
+ * 用户往下滚时看到的是终态。两套动画同时存在只会互相打架。
+ */
+[data-reveal] > .section,
+[data-reveal] > section.section {
+  animation: none;
+}
+
+/*
+ * 首屏 stat-row 的 stagger 交给 RevealGroup（同样滚动/首次可见触发）。
+ * 指标卡自己不再带挂载动画，--reveal-i 负责错开。
+ */
+[data-reveal-group].stat-row > * {
+  animation: none;
+}
 
 /* 图表线条：让折线「画出来」而不是直接出现 */
 svg path[stroke]:not([stroke="none"]) {

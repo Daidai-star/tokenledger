@@ -699,32 +699,56 @@ export class Queries {
   /**
    * Token 速率（吞吐）统计。
    *
-   * 事件是「一次请求完成」的瞬时记录，所以速率要按分钟分桶来算才有意义：
-   *   每分钟 token 数 = 该分钟内所有请求的 token 之和
+   * ## 口径：主指标是**生成速度**，不是上下文吞吐
    *
-   * 提供三层：
-   *   overall  — 全局速率画像（活跃分钟内均值、峰值、中位数）
-   *   byDay    — 每日速率曲线
-   *   byHour   — 24 小时速率画像（找高产时段）
-   *   byTool   — 各工具速率对比
-   *   recent   — 最近 N 分钟的滚动速率（实时感）
+   * 第一版这里用 `SUM(total_tokens)`，而 `total_tokens` 里 94.6% 是
+   * `cache_read_tokens`——agent 每轮把整个上下文重发一遍。
+   * 于是「每秒 token」测的是**上下文窗口有多大**，不是**干活强度**：
+   * 本机中位数 147,899 tok/s，但那个数里真正新生成的只有 247 tok/s。
+   *
+   * 所以拆成两个口径：
+   *   gen  — 输出 token，每秒。这是模型真实的生成速度，也是主指标。
+   *   ctx  — 新鲜输入 + 缓存读 + 缓存写，每秒。这是上下文重读的吞吐，
+   *          单独列出来并标注「不计入生成速度」，因为它的量级由上下文长度
+   *          决定，跟编码速度无关。
+   *
+   * 按天/按小时/按工具一律用**输出 token/分钟**，和主指标同口径，
+   * 避免出现「首屏 247 tok/s、日曲线 30 万 tok/min」的自相矛盾。
+   *
+   * ## 同刻去重
+   *
+   * 会话恢复时 Codex 会把积压的 `token_count` 一次性刷出，全部盖上恢复时刻的
+   * 时间戳（实测某一秒挤进 2748 条、仅 363 个不同毫秒）。按 `(session_id, ts)`
+   * 取首条，与 `coldStart` 已有的 `ROW_NUMBER()` 口径保持一致。
+   * 全库 592 个毫秒受影响、合计占总量 5.65%，不去重会让峰值失真两个数量级。
    */
   rate(q = {}) {
     const w = this.#eventWhere(q);
 
-    // 同时按「本地秒」和「本地分钟」分桶。
+    // 同时按「本地秒」分桶，并保留「本地分钟」键供按天/按小时聚合。
     // 秒级用来回答「我最快的那一秒烧了多少」——分钟桶会把尖峰抹平；
     // 分钟级保留给按天/按小时的聚合，否则那些视图会因为秒级噪声而抖动。
     // strftime 加 localtime 保证小时/日期跟用户时区一致。
+    // 外层 CTE 先按 (session_id, ts) 去重，再分桶——否则恢复突发会把峰值
+    // 顶到几亿 token/秒，那是日志补写不是吞吐。
     const buckets = this.store
       .prep(
-        `SELECT
+        `WITH dedup AS (
+           SELECT * FROM (
+             SELECT ts, day, hour, tool,
+                    input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
+                    ROW_NUMBER() OVER (PARTITION BY session_id, ts ORDER BY ts) AS rn
+             FROM usage_events ${w.where}
+           ) WHERE rn = 1
+         )
+         SELECT
            CAST(strftime('%s', ts/1000, 'unixepoch', 'localtime') AS INTEGER) AS second,
            day, hour, tool,
            COUNT(*) AS requests,
-           SUM(total_tokens) AS tokens,
-           SUM(output_tokens) AS output_tokens
-         FROM usage_events ${w.where}
+           SUM(output_tokens) AS gen_tokens,
+           SUM(input_tokens + cache_read_tokens + cache_write_tokens) AS ctx_tokens,
+           SUM(output_tokens + input_tokens + cache_read_tokens + cache_write_tokens) AS total_tokens
+         FROM dedup
          GROUP BY second, tool`,
       )
       .all(...w.params);
@@ -732,105 +756,147 @@ export class Queries {
     if (!buckets.length) {
       return {
         overall: null,
+        context: null,
         byDay: [],
         byHour: [],
         byTool: [],
         recent: [],
         summary: {
           activeSeconds: 0,
-          activeMinutes: 0,
           totalTokens: 0,
-          avgPerSecond: 0,
-          peakPerSecond: 0,
+          genPerSecond: 0,
+          peakGenPerSecond: 0,
+          ctxPerSecond: 0,
         },
       };
     }
 
     // ---------- 汇总 ----------
+    // 两套并行累加：gen = 生成速度（主指标），ctx = 上下文重读吞吐（次要指标）。
+    // 两者量级差两个数量级，混在一起算就是算术没错但没有意义。
     let totalTokens = 0;
     let totalRequests = 0;
-    const perSecond = new Map(); // second -> tokens
-    const perSecondTool = new Map(); // second -> Map(tool -> tokens)
-    const perDay = new Map(); // day -> {tokens, minutes:Set}
-    const perHour = new Map(); // hour -> {tokens, minutes:Set}
-    const perTool = new Map(); // tool -> {tokens, minutes:Set}
+    const perSecond = new Map(); // second -> {gen, ctx}
+    const perSecondTool = new Map(); // second -> Map(tool -> gen)
+    const perDay = new Map(); // day -> {gen, ctx, minutes:Set, requests}
+    const perHour = new Map(); // hour -> {gen, ctx, minutes:Set, requests}
+    const perTool = new Map(); // tool -> {gen, ctx, minutes:Set, requests}
 
     for (const b of buckets) {
       const s = b.second;
       // 分钟键仅用于按天/按小时的活跃度统计（秒级太细，聚合会不稳）
       const m = Math.floor(s / 60);
-      totalTokens += b.tokens;
+      const gen = b.gen_tokens || 0;
+      const ctx = b.ctx_tokens || 0;
+      totalTokens += b.total_tokens;
       totalRequests += b.requests;
 
-      perSecond.set(s, (perSecond.get(s) || 0) + b.tokens);
+      const cur = perSecond.get(s) || { gen: 0, ctx: 0 };
+      cur.gen += gen;
+      cur.ctx += ctx;
+      perSecond.set(s, cur);
       if (!perSecondTool.has(s)) perSecondTool.set(s, new Map());
       const mt = perSecondTool.get(s);
-      mt.set(b.tool, (mt.get(b.tool) || 0) + b.tokens);
+      mt.set(b.tool, (mt.get(b.tool) || 0) + gen);
 
-      if (!perDay.has(b.day)) perDay.set(b.day, { tokens: 0, minutes: new Set(), requests: 0 });
+      if (!perDay.has(b.day)) perDay.set(b.day, { gen: 0, ctx: 0, minutes: new Set(), requests: 0 });
       const d = perDay.get(b.day);
-      d.tokens += b.tokens;
+      d.gen += gen;
+      d.ctx += ctx;
       d.requests += b.requests;
       d.minutes.add(m);
 
-      if (!perHour.has(b.hour)) perHour.set(b.hour, { tokens: 0, minutes: new Set(), requests: 0 });
+      if (!perHour.has(b.hour)) perHour.set(b.hour, { gen: 0, ctx: 0, minutes: new Set(), requests: 0 });
       const h = perHour.get(b.hour);
-      h.tokens += b.tokens;
+      h.gen += gen;
+      h.ctx += ctx;
       h.requests += b.requests;
       h.minutes.add(m);
 
-      if (!perTool.has(b.tool)) perTool.set(b.tool, { tokens: 0, minutes: new Set(), requests: 0 });
+      if (!perTool.has(b.tool)) perTool.set(b.tool, { gen: 0, ctx: 0, minutes: new Set(), requests: 0 });
       const t = perTool.get(b.tool);
-      t.tokens += b.tokens;
+      t.gen += gen;
+      t.ctx += ctx;
       t.requests += b.requests;
       t.minutes.add(m);
     }
 
     const activeSeconds = perSecond.size;
-    const avgPerSecond = totalTokens / activeSeconds;
 
-    // 峰值：找出 token 最多的那一秒，并给出当时的工具构成
-    let peakSecond = null;
-    let peakTokens = 0;
-    for (const [s, tokens] of perSecond) {
-      if (tokens > peakTokens) {
-        peakTokens = tokens;
-        peakSecond = s;
+    /**
+     * 把「second -> {gen, ctx}」压成一组分布统计。
+     * 中位数与 P95 对长尾稳健，比均值更能代表「常态速率」；
+     * 分母用活跃秒而非全部秒——空秒会把分布压低，那是噪声不是事实。
+     */
+    const stat = (pick) => {
+      const entries = [...perSecond.entries()];
+      const vals = entries.map(([, v]) => pick(v)).sort((a, b) => a - b);
+      let peakSecond = null;
+      let peakTokens = 0;
+      for (const [s, v] of entries) {
+        const t = pick(v);
+        if (t > peakTokens) {
+          peakTokens = t;
+          peakSecond = s;
+        }
       }
-    }
-    const peakBreakdown = peakSecond
-      ? [...(perSecondTool.get(peakSecond) || new Map())]
-          .map(([tool, tokens]) => ({ tool, tokens }))
-          .sort((a, b) => b.tokens - a.tokens)
-      : [];
+      return {
+        avg: Math.round(vals.reduce((a, b) => a + b, 0) / (vals.length || 1)),
+        median: vals.length ? vals[Math.floor(vals.length / 2)] : 0,
+        p95: vals.length ? vals[Math.floor(vals.length * 0.95)] : 0,
+        peak: peakTokens,
+        peakSecond,
+      };
+    };
 
-    // 中位数与 P95：对长尾更稳健，比均值更能代表「常态速率」。
-    // 分母用活跃秒而非全部秒——空秒会把分布压低，那是噪声不是事实。
-    const sorted = [...perSecond.values()].sort((a, b) => a - b);
-    const medianPerSecond = sorted.length ? sorted[Math.floor(sorted.length / 2)] : 0;
-    const p95PerSecond = sorted.length ? sorted[Math.floor(sorted.length * 0.95)] : 0;
+    const genStat = stat((v) => v.gen);
+    const ctxStat = stat((v) => v.ctx);
 
-    // ---------- 每日速率 ----------
+    // 峰值秒的工具构成，按生成量拆——回答「最快那一秒是谁在烧」
+    const peakBreakdown =
+      genStat.peakSecond != null
+        ? [...(perSecondTool.get(genStat.peakSecond) || new Map())]
+            .map(([tool, tokens]) => ({ tool, tokens }))
+            .sort((a, b) => b.tokens - a.tokens)
+        : [];
+
+    // ---------- 每日速率（与主指标同口径：输出 token/分钟）----------
     const byDay = [...perDay.entries()]
       .map(([day, v]) => ({
         day,
-        tokens: v.tokens,
+        tokens: v.gen + v.ctx,
+        genTokens: v.gen,
+        ctxTokens: v.ctx,
         requests: v.requests,
         activeMinutes: v.minutes.size,
-        perMinute: Math.round(v.tokens / v.minutes.size),
+        genPerMinute: Math.round(v.gen / v.minutes.size),
+        ctxPerMinute: Math.round(v.ctx / v.minutes.size),
       }))
       .sort((a, b) => (a.day < b.day ? -1 : 1));
 
     // ---------- 24 小时速率画像 ----------
     const byHour = Array.from({ length: 24 }, (_, h) => {
       const v = perHour.get(h);
-      if (!v) return { hour: h, tokens: 0, requests: 0, activeMinutes: 0, perMinute: 0 };
+      if (!v)
+        return {
+          hour: h,
+          tokens: 0,
+          genTokens: 0,
+          ctxTokens: 0,
+          requests: 0,
+          activeMinutes: 0,
+          genPerMinute: 0,
+          ctxPerMinute: 0,
+        };
       return {
         hour: h,
-        tokens: v.tokens,
+        tokens: v.gen + v.ctx,
+        genTokens: v.gen,
+        ctxTokens: v.ctx,
         requests: v.requests,
         activeMinutes: v.minutes.size,
-        perMinute: Math.round(v.tokens / v.minutes.size),
+        genPerMinute: Math.round(v.gen / v.minutes.size),
+        ctxPerMinute: Math.round(v.ctx / v.minutes.size),
       };
     });
 
@@ -838,34 +904,59 @@ export class Queries {
     const byTool = [...perTool.entries()]
       .map(([tool, v]) => ({
         tool,
-        tokens: v.tokens,
+        tokens: v.gen + v.ctx,
+        genTokens: v.gen,
+        ctxTokens: v.ctx,
         requests: v.requests,
         activeMinutes: v.minutes.size,
-        perMinute: Math.round(v.tokens / v.minutes.size),
+        genPerMinute: Math.round(v.gen / v.minutes.size),
+        ctxPerMinute: Math.round(v.ctx / v.minutes.size),
       }))
-      .sort((a, b) => b.perMinute - a.perMinute);
+      .sort((a, b) => b.genPerMinute - a.genPerMinute);
 
     // ---------- 最近 N 秒滚动速率 ----------
+    // 和主指标一致：只统计输出（生成速度），免得迷你图和上面的大数字口径打架
     const recentSeconds = Number(q.recentSeconds) || 60;
     const lastSecond = Math.max(...perSecond.keys());
     const recent = [];
     for (let s = lastSecond - recentSeconds + 1; s <= lastSecond; s++) {
-      recent.push({ second: s, tokens: perSecond.get(s) || 0 });
+      recent.push({ second: s, tokens: perSecond.get(s)?.gen || 0 });
+    }
+
+    // 全部活跃秒的生成量 / 上下文量合计，供首屏直接引用
+    let totalGen = 0;
+    let totalCtx = 0;
+    for (const v of perSecond.values()) {
+      totalGen += v.gen;
+      totalCtx += v.ctx;
     }
 
     return {
+      /** 主指标：生成速度（输出 token/秒） */
       overall: {
         activeSeconds,
-        activeMinutes: activeSeconds, // 兼容旧字段名，值已是秒级
         totalTokens,
         totalRequests,
-        avgPerSecond: Math.round(avgPerSecond),
-        medianPerSecond: Math.round(medianPerSecond),
-        p95PerSecond: Math.round(p95PerSecond),
-        peakPerSecond: peakTokens,
-        peakAt: peakSecond != null ? peakSecond * 1000 : null,
+        totalGen,
+        totalCtx,
+        avgPerSecond: genStat.avg,
+        medianPerSecond: genStat.median,
+        p95PerSecond: genStat.p95,
+        peakPerSecond: genStat.peak,
+        peakAt: genStat.peakSecond != null ? genStat.peakSecond * 1000 : null,
         peakBreakdown,
         activeHours: Math.round((activeSeconds / 3600) * 10) / 10,
+      },
+      /**
+       * 次指标：上下文吞吐（新鲜输入 + 缓存读 + 缓存写，每秒）。
+       * 量级由上下文长度决定，不是编码速度——界面上要和生成速度分开说。
+       */
+      context: {
+        activeSeconds,
+        avgPerSecond: ctxStat.avg,
+        medianPerSecond: ctxStat.median,
+        p95PerSecond: ctxStat.p95,
+        peakPerSecond: ctxStat.peak,
       },
       byDay,
       byHour,
@@ -873,10 +964,10 @@ export class Queries {
       recent,
       summary: {
         activeSeconds,
-        activeMinutes: activeSeconds, // 兼容旧字段名
         totalTokens,
-        avgPerSecond: Math.round(avgPerSecond),
-        peakPerSecond: peakTokens,
+        genPerSecond: genStat.avg,
+        peakGenPerSecond: genStat.peak,
+        ctxPerSecond: ctxStat.avg,
       },
     };
   }

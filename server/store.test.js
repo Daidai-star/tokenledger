@@ -334,10 +334,15 @@ test("dataRange 空库返回 null", () => {
 
 // -------------------------------------------------------------- 速率统计
 
+// 速率统计的用例一律用 **outputTokens**。
+// 主指标是生成速度（输出 token/秒），inputTokens 属于上下文口径，
+// 用它断言主指标会掩盖「缓存读混进速率」这类问题。
+
 test("rate 空库返回 null overall", () => {
   const { store, q, dir } = freshStore();
   const r = q.rate({});
   assert.equal(r.overall, null);
+  assert.equal(r.context, null);
   assert.deepEqual(r.byDay, []);
   store.close();
   fs.rmSync(dir, { recursive: true, force: true });
@@ -350,7 +355,7 @@ test("rate 按秒分桶算平均值", () => {
     tool: "codex",
     model: "gpt-5",
     ts: Date.parse(iso),
-    inputTokens: tokens,
+    outputTokens: tokens,
   });
   // 同一秒两条（相差 200ms）：100 + 300 = 400
   store.insertEvents([at("2026-03-01T10:00:10.000Z", 100), at("2026-03-01T10:00:10.200Z", 300)]);
@@ -366,10 +371,31 @@ test("rate 按秒分桶算平均值", () => {
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
+test("rate 的缓存读不进生成速度，只进上下文吞吐", () => {
+  const { store, q, dir } = freshStore();
+  store.insertEvents([
+    new UsageEvent({
+      id: "c1",
+      tool: "codex",
+      model: "m",
+      ts: Date.parse("2026-03-01T10:00:10Z"),
+      inputTokens: 1_000,
+      outputTokens: 50,
+      cacheReadTokens: 400_000,
+    }),
+  ]);
+  const r = q.rate({});
+  assert.equal(r.overall.medianPerSecond, 50, "生成速度只认输出");
+  assert.equal(r.overall.avgPerSecond, 50);
+  assert.equal(r.context.medianPerSecond, 401_000, "上下文吞吐单列 1000 + 400000");
+  store.close();
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
 test("rate 的 byDay / byHour 正确聚合", () => {
   const { store, q, dir } = freshStore();
   const at = (iso, tokens, tool = "codex") =>
-    new UsageEvent({ id: iso + tokens + tool, tool, model: "m", ts: Date.parse(iso), inputTokens: tokens });
+    new UsageEvent({ id: iso + tokens + tool, tool, model: "m", ts: Date.parse(iso), outputTokens: tokens });
   store.insertEvents([at("2026-03-01T10:00:10Z", 100), at("2026-03-01T10:01:10Z", 100)]);
   store.insertEvents([at("2026-03-02T10:00:10Z", 500, "dsh")]);
   const r = q.rate({});
@@ -377,9 +403,9 @@ test("rate 的 byDay / byHour 正确聚合", () => {
   const d1 = r.byDay.find((d) => d.day === "2026-03-01");
   assert.equal(d1.tokens, 200);
   assert.equal(d1.activeMinutes, 2);
-  assert.equal(d1.perMinute, 100);
+  assert.equal(d1.genPerMinute, 100, "日曲线用生成速度口径，和首屏一致");
   const d2 = r.byDay.find((d) => d.day === "2026-03-02");
-  assert.equal(d2.perMinute, 500);
+  assert.equal(d2.genPerMinute, 500);
   // 24 小时都要有值（缺省补 0）
   assert.equal(r.byHour.length, 24);
   // 三条事件都落在同一本地小时（相差 1 分钟，跨不了小时边界）
@@ -387,22 +413,22 @@ test("rate 的 byDay / byHour 正确聚合", () => {
   const h = r.byHour[hour];
   assert.equal(h.tokens, 700);
   assert.equal(h.activeMinutes, 3);
-  assert.equal(h.perMinute, Math.round(700 / 3));
+  assert.equal(h.genPerMinute, Math.round(700 / 3));
   store.close();
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-test("rate 的 byTool 按工具分列并按速率降序", () => {
+test("rate 的 byTool 按工具分列并按生成速度降序", () => {
   const { store, q, dir } = freshStore();
   const at = (iso, tokens, tool) =>
-    new UsageEvent({ id: iso + tokens + tool, tool, model: "m", ts: Date.parse(iso), inputTokens: tokens });
+    new UsageEvent({ id: iso + tokens + tool, tool, model: "m", ts: Date.parse(iso), outputTokens: tokens });
   store.insertEvents([at("2026-03-01T10:00:10Z", 100, "codex")]);
   store.insertEvents([at("2026-03-01T10:00:20Z", 900, "dsh")]);
   const r = q.rate({});
   assert.equal(r.byTool.length, 2);
-  assert.equal(r.byTool[0].tool, "dsh", "速率高的排前面");
-  assert.equal(r.byTool[0].perMinute, 900);
-  assert.equal(r.byTool[1].perMinute, 100);
+  assert.equal(r.byTool[0].tool, "dsh", "生成速度高的排前面");
+  assert.equal(r.byTool[0].genPerMinute, 900);
+  assert.equal(r.byTool[1].genPerMinute, 100);
   store.close();
   fs.rmSync(dir, { recursive: true, force: true });
 });
@@ -410,7 +436,7 @@ test("rate 的 byTool 按工具分列并按速率降序", () => {
 test("rate 的 recent 覆盖到最后一秒且长度正确", () => {
   const { store, q, dir } = freshStore();
   const ts = Date.parse("2026-03-01T10:00:10Z");
-  store.insertEvents([new UsageEvent({ id: "r1", tool: "codex", model: "m", ts, inputTokens: 100 })]);
+  store.insertEvents([new UsageEvent({ id: "r1", tool: "codex", model: "m", ts, outputTokens: 100 })]);
   const r = q.rate({ recentSeconds: 30 });
   assert.equal(r.recent.length, 30);
   assert.equal(r.recent[r.recent.length - 1].tokens, 100, "最后一秒是最新活跃秒");
@@ -423,8 +449,8 @@ test("rate 的 peakBreakdown 指出峰值秒的来源工具", () => {
   const { store, q, dir } = freshStore();
   const t = Date.parse("2026-03-01T10:00:00Z");
   store.insertEvents([
-    new UsageEvent({ id: "p1", tool: "codex", model: "m", ts: t + 5200, inputTokens: 900 }),
-    new UsageEvent({ id: "p2", tool: "dsh", model: "m", ts: t + 5400, inputTokens: 100 }),
+    new UsageEvent({ id: "p1", tool: "codex", model: "m", ts: t + 5200, outputTokens: 900 }),
+    new UsageEvent({ id: "p2", tool: "dsh", model: "m", ts: t + 5400, outputTokens: 100 }),
   ]);
   const r = q.rate({});
   assert.equal(r.overall.peakPerSecond, 1000);
@@ -442,11 +468,11 @@ test("rate 中位数与 P95 对长尾稳健", () => {
   const base = Date.parse("2026-03-01T10:00:00Z");
   for (let i = 0; i < 10; i++) {
     store.insertEvents([
-      new UsageEvent({ id: `n${i}`, tool: "codex", model: "m", ts: base + i * 1000, inputTokens: 100 }),
+      new UsageEvent({ id: `n${i}`, tool: "codex", model: "m", ts: base + i * 1000, outputTokens: 100 }),
     ]);
   }
   store.insertEvents([
-    new UsageEvent({ id: "spike", tool: "codex", model: "m", ts: base + 20 * 1000, inputTokens: 100_000 }),
+    new UsageEvent({ id: "spike", tool: "codex", model: "m", ts: base + 20 * 1000, outputTokens: 100_000 }),
   ]);
   const r = q.rate({});
   assert.equal(r.overall.peakPerSecond, 100_000);
@@ -456,11 +482,27 @@ test("rate 中位数与 P95 对长尾稳健", () => {
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
+test("rate 同一 session 同一毫秒只计首条（恢复突发）", () => {
+  const { store, q, dir } = freshStore();
+  const ts = Date.parse("2026-03-01T10:00:10Z");
+  // 会话恢复时 Codex 会把积压的 token_count 一次性刷出，时间戳全部相同
+  store.insertEvents([
+    new UsageEvent({ id: "b1", tool: "codex", model: "m", sessionId: "s1", ts, outputTokens: 80 }),
+    new UsageEvent({ id: "b2", tool: "codex", model: "m", sessionId: "s1", ts, outputTokens: 80 }),
+    new UsageEvent({ id: "b3", tool: "codex", model: "m", sessionId: "s1", ts, outputTokens: 80 }),
+  ]);
+  const r = q.rate({});
+  assert.equal(r.overall.peakPerSecond, 80, "同刻补写只留首条，不该被乘以 3");
+  assert.equal(r.overall.totalGen, 80);
+  store.close();
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
 test("rate 支持时间范围与工具过滤", () => {
   const { store, q, dir } = freshStore();
   store.insertEvents([
-    new UsageEvent({ id: "a", tool: "codex", model: "m", ts: Date.parse("2026-03-01T10:00:10Z"), inputTokens: 100 }),
-    new UsageEvent({ id: "b", tool: "dsh", model: "m", ts: Date.parse("2026-04-01T10:00:10Z"), inputTokens: 999 }),
+    new UsageEvent({ id: "a", tool: "codex", model: "m", ts: Date.parse("2026-03-01T10:00:10Z"), outputTokens: 100 }),
+    new UsageEvent({ id: "b", tool: "dsh", model: "m", ts: Date.parse("2026-04-01T10:00:10Z"), outputTokens: 999 }),
   ]);
   const onlyCodex = q.rate({ tools: ["codex"] });
   assert.equal(onlyCodex.overall.totalTokens, 100);

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Children, isValidElement, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityHeatmap,
   CompositionBar,
@@ -19,6 +19,7 @@ import {
   WasteSection,
 } from "./components/Insights";
 import { MallSection } from "./components/Mall";
+import { Reveal, RevealGroup } from "./reveal";
 import { TABS, sectionsInTab } from "./sections";
 import ScanFlow from "./components/ScanFlow";
 import { fetchDashboard, triggerReset, triggerScan } from "./api";
@@ -256,16 +257,17 @@ function Toolbar({
 /** Token 速率区块 */
 function RateSection({ data }: { data: Dashboard }) {
   const r = data.rate;
-  if (!r.overall) return null;
+  if (!r.overall || !r.context) return null;
   const o = r.overall;
+  const c = r.context;
   const toolName = (id: string) => data.tools.find((t) => t.id === id)?.name || id;
   const toolColor = (id: string) => data.tools.find((t) => t.id === id)?.color || "var(--ink-3)";
   const bestHour = r.byHour.reduce(
-    (best, h) => (h.perMinute > (best?.perMinute ?? 0) ? h : best),
+    (best, h) => (h.genPerMinute > (best?.genPerMinute ?? 0) ? h : best),
     null as typeof r.byHour[number] | null,
   );
   const bestDayData = r.byDay.reduce(
-    (best, d) => (d.perMinute > (best?.perMinute ?? 0) ? d : best),
+    (best, d) => (d.genPerMinute > (best?.genPerMinute ?? 0) ? d : best),
     null as typeof r.byDay[number] | null,
   );
   const bestDay = bestDayData?.day || "";
@@ -275,7 +277,9 @@ function RateSection({ data }: { data: Dashboard }) {
       <div className="section-head">
         <div>
           <h2>Token 速率</h2>
-          <div className="sub">按秒分桶计算的吞吐强度，反映「你真正在写代码时」的密度</div>
+          <div className="sub">
+            主指标是<b>生成速度</b>——模型每秒真正写出多少 token，而不是上下文吞吐
+          </div>
         </div>
       </div>
 
@@ -333,6 +337,31 @@ function RateSection({ data }: { data: Dashboard }) {
         </div>
       </div>
 
+      <div className="caliber-note">
+        <div className="caliber-main">
+          <b>为什么不是「每秒总 token」？</b>
+          <p>
+            agent 每轮都要把整个上下文重发一遍，缓存重读占全库 token 的{" "}
+            <b>94.6%</b>。把它算进速率，测到的其实是「你的上下文窗口有多大」，
+            而不是编码速度——本机那会是中位数 147,899 tok/s。
+            上面主指标只统计<b>输出 token</b>。
+          </p>
+        </div>
+        <div className="caliber-side">
+          <div className="k">上下文吞吐（次指标）</div>
+          <div className="v">
+            {tokens(c.medianPerSecond)}
+            <small>tok/s 中位数</small>
+          </div>
+          <div className="s">
+            平均 {tokens(c.avgPerSecond)} · 峰值 {tokens(c.peakPerSecond)}
+          </div>
+          <div className="s dim">
+            新鲜输入 + 缓存读 + 缓存写。量级由上下文长度决定，<b>不计入生成速度</b>。
+          </div>
+        </div>
+      </div>
+
       <div className="grid-2">
         <div className="panel">
           <div className="section-head" style={{ marginBottom: 16 }}>
@@ -345,10 +374,10 @@ function RateSection({ data }: { data: Dashboard }) {
             labels={r.byDay.map((d) => d.day)}
             series={[
               {
-                key: "rate",
-                label: "tok/min（活跃分钟均值）",
+                key: "gen",
+                label: "生成速度 tok/min（输出 / 活跃分钟）",
                 color: "var(--c-clay)",
-                values: r.byDay.map((d) => d.perMinute),
+                values: r.byDay.map((d) => d.genPerMinute),
               },
             ]}
             height={240}
@@ -356,23 +385,23 @@ function RateSection({ data }: { data: Dashboard }) {
           <div className="peak-note" style={{ marginTop: 16 }}>
             日均峰值出现在 <b>{fmtDateFull(bestDay)}</b>，当日活跃{" "}
             <b>{fmtInt(bestDayData?.activeMinutes || 0)}</b> 分钟，
-            活跃分钟内平均 <b>{tokens(bestDayData?.perMinute || 0)}</b> tok/min。
+            活跃分钟内平均生成 <b>{tokens(bestDayData?.genPerMinute || 0)}</b> tok/min。
           </div>
         </div>
 
         <div className="panel">
           <div className="section-head" style={{ marginBottom: 16 }}>
             <h2 style={{ fontSize: 16 }}>时段速率</h2>
-            <span className="sub">活跃分钟内的平均 tok/min</span>
+            <span className="sub">活跃分钟内的生成 tok/min</span>
           </div>
-          <HourBars hours={r.byHour} valueKey="perMinute" format={tokens} />
+          <HourBars hours={r.byHour} valueKey="genPerMinute" format={tokens} />
           <div style={{ marginTop: 22 }}>
             <RankBars
               rows={r.byTool.slice(0, 5).map((t) => ({
                 key: t.tool,
                 label: toolName(t.tool),
                 sub: `${fmtInt(t.activeMinutes)} 分钟`,
-                value: t.perMinute,
+                value: t.genPerMinute,
                 color: toolColor(t.tool),
                 extra: `${fmtInt(t.requests)} 次`,
               }))}
@@ -402,10 +431,30 @@ function RateSection({ data }: { data: Dashboard }) {
  * 分栏开关。渲染成 null 就是「不显示」——比用 CSS 隐藏好，因为
  * 隐藏的图表仍会跑 IntersectionObserver、仍在 layout 里占位，
  * 切栏时会出现空白跳动。
+ *
+ * 这里同时是**滚动入场动效的唯一接入点**：每个顶层区块包一层 `Reveal`，
+ * 于是往下滚时区块会依次浮现。
+ *
+ * 之前没有这一步，是因为入场动画全写在 CSS 的 `animation: fade-up` 上，
+ * 那是**挂载动画**——切栏时该栏所有区块同时挂载，动画在同一瞬间一起放完，
+ * 用户再往下滚时全部已是终态，于是「滚动时元素动起来」根本没发生。
+ * 详见 `reveal.tsx`。
  */
 function Tab({ name, tab, children }: { name: string; tab: string; children: React.ReactNode }) {
   if (!sectionsInTab(tab).includes(name)) return null;
-  return <>{children}</>;
+  return (
+    <>
+      {Children.map(children, (child, i) =>
+        isValidElement(child) ? (
+          <Reveal key={i} delay={i * 60} distance={18}>
+            {child}
+          </Reveal>
+        ) : (
+          child
+        ),
+      )}
+    </>
+  );
 }
 
 /** 分栏标签栏。粘在顶部，滚动时始终可达。 */
@@ -609,7 +658,7 @@ export default function App() {
 
       <TabBar tab={tab} setTab={setTab} />
 
-      <section className="stat-row">
+      <RevealGroup as="section" className="stat-row" step={45} distance={10}>
         <Metric label="总 Token" value={tokens(o.total_tokens)} sub={`输出 ${tokens(o.output_tokens)}`} />
         <Metric label="请求" value={fmtInt(o.requests)} sub={`${fmtInt(o.sessions)} 会话`} delay={60} />
         <Metric label="预估成本" value={fmtCost(o.cost_usd)} sub={`${fmtCost(o.requests ? o.cost_usd / o.requests : 0)}/请求`} delay={120} />
@@ -621,7 +670,7 @@ export default function App() {
           sub={o.failures ? `${fmtInt(o.failures)} 次失败` : "工具未记录"}
           delay={300}
         />
-      </section>
+      </RevealGroup>
 
       <InsightStrip
         waste={data.waste}

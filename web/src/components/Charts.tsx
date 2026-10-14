@@ -407,8 +407,15 @@ export function HourBars({
   format = fmtInt,
   highlight = null,
 }: {
-  hours: { hour: number; requests?: number; total_tokens?: number; perMinute?: number }[];
-  valueKey?: "requests" | "total_tokens" | "perMinute";
+  hours: {
+    hour: number;
+    requests?: number;
+    total_tokens?: number;
+    perMinute?: number;
+    genPerMinute?: number;
+  }[];
+  // genPerMinute = 输出 token/活跃分钟（速率区块的生成速度口径）
+  valueKey?: "requests" | "total_tokens" | "perMinute" | "genPerMinute";
   format?: (n: number) => string;
   highlight?: ((h: number) => string | null) | null;
 }) {
