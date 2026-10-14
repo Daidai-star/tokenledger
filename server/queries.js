@@ -114,6 +114,11 @@ export class Queries {
                 SUM(input_tokens) AS input_tokens,
                 SUM(output_tokens) AS output_tokens,
                 SUM(cache_read_tokens) AS cache_read_tokens,
+                -- 含缓存的 input：= 新鲜输入 + 缓存读 + 缓存写。
+                -- 与 CC Switch / Codex 原始日志同口径（它们的 input_tokens 本就含 cached）。
+                -- 三项都要加：漏掉 cache_write 会让总量差 515,664（claude-code 等工具有写入）。
+                -- 库里存的 input_tokens 是新鲜输入，单列出来是为了展示时能两个口径都给。
+                SUM(input_tokens) + SUM(cache_read_tokens) + SUM(cache_write_tokens) AS input_incl_cache,
                 SUM(cost_usd) AS cost_usd,
                 SUM(failures) AS failures
          FROM daily_rollups ${w.sql}

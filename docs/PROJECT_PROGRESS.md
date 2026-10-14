@@ -13,16 +13,17 @@
 ## 当前状态
 
 v0.1.0 已发布并修好首次 Release 的构建问题。速率口径已修正为生成速度，
-滚动入场动效已改为真正的滚动触发。尚未发布新版本。
+滚动入场动效已改为真正的滚动触发，速率区块已改版为天级用量/成本视图，
+input 口径已对齐 CC Switch。尚未发布新版本。
 
-验证结果（2026-10-13）：
+验证结果（2026-10-14）：
 
 | 检查项 | 命令 | 结果 |
 | --- | --- | --- |
 | 测试 | `npm test` | 170 passed / 0 failed |
 | 类型 | `npm run typecheck` | 通过 |
-| 前端构建 | `npm run build` | 通过，222.17 kB（gzip 70.06 kB） |
-| 接口 | `node server/index.js` + curl | `/api/dashboard` 返回生成速度 247/529 tok/s |
+| 前端构建 | `npm run build` | 通过，224.39 kB（gzip 70.79 kB） |
+| 口径校验 | 脚本对比 | `Σ(含缓存input)+Σ输出 = total_tokens`，完全相等 |
 | 浏览器渲染 | Playwright 1280px + 390px × 7 栏 | 全部区块随滚动入场、无横向溢出、无 console error |
 
 ## 已完成工作
@@ -205,6 +206,43 @@ agent 每轮把整个对话上下文重发一遍（实测单轮 `cached_input_to
 同时删掉 `[data-reveal]` 内层 section 的挂载动画，两套动画并存只会打架。
 
 ## 重要口径与决策
+
+**对齐 CC Switch：`input` 展示为含缓存读（2026-10-14）。**
+
+参考 `~/.cc-switch/cc-switch.db`，它的 `proxy_request_logs.input_tokens`
+是**含 `cached_input_tokens` 的原始 input**。证据：24,562 行 **100% 满足
+`input > cache_read`**，且 `input - cache_read` 集中在 0~10K
+（8566 行 0~1K / 14528 行 1K~10K），符合「原始 input = 新鲜输入 + cached」。
+
+**我们的总量本来就和它相等**，不用改采集层也不用重扫：
+
+```
+我们的 total      = input_fresh + cache_read + cache_write + output
+CC Switch 的 total = (input 含缓存) + output
+```
+
+`input_fresh + cache_read = 原始 input`，唯一差额是 `cache_write`。
+实测全时段 `Σ(新鲜输入 + 缓存读 + 缓存写) + Σ输出 = 13,337,894,848`，
+与库里 `total_tokens` **完全相等**。
+
+所以对齐是**纯展示层改动**：`timeseries()` 增加 `input_incl_cache` 字段，
+界面上 input 用含缓存口径。**漏掉 `cache_write` 会差 515,664**
+（claude-code 等工具有缓存写入），三项都要加。
+
+**CC Switch 的 `usage_daily_rollups` 表有 bug，不能当基准。**
+同一天（2026-02-12）对比原始行：input 记 2,012,999（实际 1,026,466，1.96×）、
+cache_read 记 33,213,824（实际 974,464，**34×**）。对齐时只参考 `proxy_request_logs`。
+
+**TokenBreakdown 的「新鲜输入」切片此前恒为 0。**
+组件里写的是 `input - cacheRead`，但传进去的 `o.input_tokens` 已经是新鲜输入，
+等于把缓存减了两次；而缓存读（12.6B）本就远大于新鲜输入（0.68B），
+`Math.max(0, ...)` 永远归零。已改为直接用 `input`，现在正常显示 680.36M (5.1%)。
+
+**速率区块改版为「用量与成本」（2026-10-14）。**
+主指标从 tok/s 换成**本月 token / 本月成本 / 本月请求 / 日均 token / 单日最高**，
+配每日用量与每日成本双图，上月同期按天数折算后对比。
+生成速度降为注脚——它回答的是另一个问题（写代码时每秒写出多少 token），
+继续做主指标会让「这个月花了多少」这个更常见的问题得不到直接回答。
 
 **冷启动的「首次」用 `ROW_NUMBER()` 而不是 `MIN(ts)`。**
 并发请求会共享同一毫秒（实测平均 2.38 条，最多 225 条），用 `MIN(ts)` 做 JOIN

@@ -630,21 +630,31 @@ export function TokenBreakdown({
   cacheWrite,
   reasoning,
 }: {
+  /** 新鲜输入（不含缓存读），与库里 `input_tokens` 一致 */
   input: number;
   output: number;
   cacheRead: number;
   cacheWrite: number;
   reasoning: number;
 }) {
+  // 注意：input 传进来的已经是「新鲜输入」，不能再减一次 cacheRead。
+  // 之前这里写的是 `input - cacheRead`，等于把缓存减了两次——
+  // 而缓存读本来就远大于新鲜输入（本机 12.6B vs 0.68B），
+  // 结果这一片恒为 0，「新鲜输入」从来没显示过。
+  const fresh = Math.max(0, input);
   const items = [
     { key: "cache", label: "缓存命中", value: cacheRead, color: "var(--c-sage)" },
-    { key: "input", label: "新鲜输入", value: Math.max(0, input - cacheRead), color: "var(--c-slate)" },
+    { key: "input", label: "新鲜输入", value: fresh, color: "var(--c-slate)" },
     { key: "output", label: "输出", value: output, color: "var(--c-clay)" },
     { key: "reasoning", label: "推理", value: reasoning, color: "var(--c-ochre)" },
     { key: "write", label: "缓存写入", value: cacheWrite, color: "var(--c-plum)" },
   ].filter((i) => i.value > 0);
   const total = items.reduce((a, i) => a + i.value, 0);
   if (!total) return <div className="empty-hint">暂无数据</div>;
+
+  // 与 CC Switch / Codex 原始日志对齐的 input 口径：新鲜输入 + 缓存读
+  const inputInclCache = fresh + cacheRead + cacheWrite;
+  const hitPct = inputInclCache ? ((cacheRead / inputInclCache) * 100).toFixed(1) : "0";
 
   return (
     <div className="token-breakdown">
@@ -671,6 +681,13 @@ export function TokenBreakdown({
             <span className="tb-pct">{((i.value / total) * 100).toFixed(1)}%</span>
           </div>
         ))}
+        <div className="tb-row tb-row-total">
+          <span className="legend-label">
+            输入合计<em>（含缓存读）</em>
+          </span>
+          <span className="tb-value">{tokens(inputInclCache)}</span>
+          <span className="tb-pct">{hitPct}% 命中</span>
+        </div>
       </div>
     </div>
   );

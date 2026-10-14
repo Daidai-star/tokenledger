@@ -254,10 +254,19 @@ function Toolbar({
   );
 }
 
-/** Token 速率区块 */
+/**
+ * 用量与成本区块。
+ *
+ * 之前这里是「Token 速率」，主指标是 tok/s。用户看完 CC Switch 的统计后
+ * 指出这个视角不对——秒级瞬时速率对「这个月花了多少」这个问题没有帮助，
+ * 而且会因为缓存重读占 94.6% 而严重失真。
+ *
+ * 改成和 CC Switch 一致的**天级用量 / 成本**视角：
+ * 主指标是本月累计 token 与成本，配每日曲线和上月对比。
+ * 生成速度保留为注脚（它回答的是另一个问题：写代码时有多快）。
+ */
 function RateSection({ data }: { data: Dashboard }) {
   const r = data.rate;
-  if (!r.overall || !r.context) return null;
   const o = r.overall;
   const c = r.context;
   const toolName = (id: string) => data.tools.find((t) => t.id === id)?.name || id;
@@ -266,98 +275,148 @@ function RateSection({ data }: { data: Dashboard }) {
     (best, h) => (h.genPerMinute > (best?.genPerMinute ?? 0) ? h : best),
     null as typeof r.byHour[number] | null,
   );
-  const bestDayData = r.byDay.reduce(
-    (best, d) => (d.genPerMinute > (best?.genPerMinute ?? 0) ? d : best),
-    null as typeof r.byDay[number] | null,
+
+  // ---------- 天级用量 / 成本 ----------
+  const days = data.timeseries;
+  if (!days.length || !o) return null;
+
+  const monthOf = (day: string) => day.slice(0, 7);
+  const curMonth = monthOf(days[days.length - 1].day);
+  const months = [...new Set(days.map((p) => monthOf(p.day)))];
+  const prevMonth = months.length > 1 ? months[months.length - 2] : null;
+
+  const sum = (list: typeof days) => list.reduce(
+    (a, p) => ({
+      tokens: a.tokens + p.total_tokens,
+      cost: a.cost + p.cost_usd,
+      requests: a.requests + p.requests,
+      input: a.input + p.input_incl_cache,
+      output: a.output + p.output_tokens,
+      cacheRead: a.cacheRead + p.cache_read_tokens,
+    }),
+    { tokens: 0, cost: 0, requests: 0, input: 0, output: 0, cacheRead: 0 },
+  );
+
+  const curDays = days.filter((p) => monthOf(p.day) === curMonth);
+  const prevDays = prevMonth ? days.filter((p) => monthOf(p.day) === prevMonth) : [];
+  const cur = sum(curDays);
+  const prev = prevDays.length ? sum(prevDays) : null;
+
+  // 上月同期对比要按天数归一，否则「上月 28 天 vs 本月 3 天」没有可比性
+  const dayRatio = prev && prevDays.length ? curDays.length / prevDays.length : 0;
+  const paceToPrev = (v: number, pv: number) => (prev && dayRatio > 0 ? (v / (pv * dayRatio) - 1) * 100 : null);
+
+  const bestDayData = curDays.reduce(
+    (best, d) => (d.total_tokens > (best?.total_tokens ?? 0) ? d : best),
+    null as (typeof days)[number] | null,
   );
   const bestDay = bestDayData?.day || "";
+  const hitPct = cur.input ? ((cur.cacheRead / cur.input) * 100).toFixed(1) : "0";
+
+  const costTrend = paceToPrev(cur.cost, prev?.cost ?? 0);
+  const tokTrend = paceToPrev(cur.tokens, prev?.tokens ?? 0);
 
   return (
     <section className="section">
       <div className="section-head">
         <div>
-          <h2>Token 速率</h2>
+          <h2>用量与成本</h2>
           <div className="sub">
-            主指标是<b>生成速度</b>——模型每秒真正写出多少 token，而不是上下文吞吐
+            按天统计。token 为<b>含缓存读</b>口径，与 Codex 原始日志、CC Switch 一致
           </div>
         </div>
       </div>
 
       <div className="rate-hero">
         <div className="rate-cell primary">
-          <div className="k">活跃秒平均</div>
+          <div className="k">本月 token</div>
           <div className="v">
-            {tokens(o.avgPerSecond)}
-            <small>tok/s</small>
-          </div>
-          <div className="s">中位数 {tokens(o.medianPerSecond)}</div>
-        </div>
-        <div className="rate-cell" style={{ animationDelay: "60ms" }}>
-          <div className="k">峰值秒</div>
-          <div className="v">
-            {tokens(o.peakPerSecond)}
-            <small>tok/s</small>
+            {tokens(cur.tokens)}
+            <small>含缓存读</small>
           </div>
           <div className="s">
-            {o.peakAt
-              ? `${new Date(o.peakAt).toLocaleString("en-GB", {
-                  month: "numeric",
-                  day: "numeric",
-                  hour: "2-digit",
-                  minute: "2-digit",
-                  second: "2-digit",
-                })}`
-              : "—"}
+            输入 {tokens(cur.input)}（{hitPct}% 命中）· 输出 {tokens(cur.output)}
+          </div>
+        </div>
+        <div className="rate-cell" style={{ animationDelay: "60ms" }}>
+          <div className="k">本月成本</div>
+          <div className="v">
+            {fmtCost(cur.cost)}
+            <small>API 等价</small>
+          </div>
+          <div className="s">
+            {costTrend != null ? (
+              <>
+                同期对比上月 <b className={costTrend > 0 ? "up" : "down"}>
+                  {costTrend > 0 ? "+" : ""}
+                  {costTrend.toFixed(0)}%
+                </b>
+              </>
+            ) : (
+              "没有上月数据可对比"
+            )}
           </div>
         </div>
         <div className="rate-cell" style={{ animationDelay: "120ms" }}>
-          <div className="k">P95</div>
+          <div className="k">本月请求</div>
           <div className="v">
-            {tokens(o.p95PerSecond)}
-            <small>tok/s</small>
-          </div>
-          <div className="s">95% 的活跃秒低于此值</div>
-        </div>
-        <div className="rate-cell" style={{ animationDelay: "180ms" }}>
-          <div className="k">活跃时长</div>
-          <div className="v">
-            {fmtInt(o.activeHours)}
-            <small>小时</small>
-          </div>
-          <div className="s">{fmtInt(o.activeSeconds)} 秒有请求</div>
-        </div>
-        <div className="rate-cell" style={{ animationDelay: "240ms" }}>
-          <div className="k">最近 60 秒</div>
-          <div style={{ marginTop: 8 }}>
-            <RateSpark recent={r.recent} />
+            {fmtInt(cur.requests)}
+            <small>次</small>
           </div>
           <div className="s">
-            合计 {tokens(r.recent.reduce((a, x) => a + x.tokens, 0))}
+            日均 {fmtInt(cur.requests / Math.max(1, curDays.length))} 次
+          </div>
+        </div>
+        <div className="rate-cell" style={{ animationDelay: "180ms" }}>
+          <div className="k">日均 token</div>
+          <div className="v">
+            {tokens(cur.tokens / Math.max(1, curDays.length))}
+            <small>/天</small>
+          </div>
+          <div className="s">
+            {tokTrend != null ? (
+              <>
+                同期 <b className={tokTrend > 0 ? "up" : "down"}>
+                  {tokTrend > 0 ? "+" : ""}
+                  {tokTrend.toFixed(0)}%
+                </b>
+              </>
+            ) : (
+              `${curMonth.replace("-", " 年 ")} 月`
+            )}
+          </div>
+        </div>
+        <div className="rate-cell" style={{ animationDelay: "240ms" }}>
+          <div className="k">单日最高</div>
+          <div style={{ fontFamily: "var(--font-serif)", fontSize: 19, marginTop: 5, letterSpacing: "-0.02em" }}>
+            {fmtDateFull(bestDay)}
+          </div>
+          <div className="s">
+            {tokens(bestDayData?.total_tokens || 0)} · {fmtCost(bestDayData?.cost_usd || 0)}
           </div>
         </div>
       </div>
 
       <div className="caliber-note">
         <div className="caliber-main">
-          <b>为什么不是「每秒总 token」？</b>
+          <b>为什么 token 里 94% 是缓存读？</b>
           <p>
-            agent 每轮都要把整个上下文重发一遍，缓存重读占全库 token 的{" "}
-            <b>94.6%</b>。把它算进速率，测到的其实是「你的上下文窗口有多大」，
-            而不是编码速度——本机那会是中位数 147,899 tok/s。
-            上面主指标只统计<b>输出 token</b>。
+            agent 每轮都要把整个上下文重发一遍。缓存命中的部分计价打很低的折扣，
+            所以<b>token 总量大不等于花钱多</b>——花钱看的是下面的成本图。
+            本月输入里 {hitPct}% 命中缓存，实际计费按未命中的部分 + 输出。
           </p>
         </div>
         <div className="caliber-side">
-          <div className="k">上下文吞吐（次指标）</div>
+          <div className="k">生成速度（注脚）</div>
           <div className="v">
-            {tokens(c.medianPerSecond)}
+            {tokens(o.medianPerSecond)}
             <small>tok/s 中位数</small>
           </div>
           <div className="s">
-            平均 {tokens(c.avgPerSecond)} · 峰值 {tokens(c.peakPerSecond)}
+            回答的是另一个问题：<b>你写代码时每秒真正写出多少 token</b>。峰值 {tokens(o.peakPerSecond)}。
           </div>
           <div className="s dim">
-            新鲜输入 + 缓存读 + 缓存写。量级由上下文长度决定，<b>不计入生成速度</b>。
+            这里只统计输出，不含缓存重读——否则会虚高两个数量级。详见速率统计接口。
           </div>
         </div>
       </div>
@@ -365,55 +424,120 @@ function RateSection({ data }: { data: Dashboard }) {
       <div className="grid-2">
         <div className="panel">
           <div className="section-head" style={{ marginBottom: 16 }}>
-            <h2 style={{ fontSize: 16 }}>每日速率</h2>
+            <h2 style={{ fontSize: 16 }}>每日用量</h2>
             <span className="sub">
               {bestHour ? `高产时段 ${bestHour.hour}:00` : ""}
             </span>
           </div>
           <TrendChart
-            labels={r.byDay.map((d) => d.day)}
+            labels={days.map((d) => d.day)}
             series={[
               {
-                key: "gen",
-                label: "生成速度 tok/min（输出 / 活跃分钟）",
+                key: "total",
+                label: "总 token（含缓存读）",
                 color: "var(--c-clay)",
-                values: r.byDay.map((d) => d.genPerMinute),
+                values: days.map((d) => d.total_tokens),
+              },
+              {
+                key: "input",
+                label: "输入（含缓存读）",
+                color: "var(--c-slate)",
+                values: days.map((d) => d.input_incl_cache),
+              },
+              {
+                key: "output",
+                label: "输出",
+                color: "var(--c-sage)",
+                values: days.map((d) => d.output_tokens),
               },
             ]}
             height={240}
           />
           <div className="peak-note" style={{ marginTop: 16 }}>
-            日均峰值出现在 <b>{fmtDateFull(bestDay)}</b>，当日活跃{" "}
-            <b>{fmtInt(bestDayData?.activeMinutes || 0)}</b> 分钟，
-            活跃分钟内平均生成 <b>{tokens(bestDayData?.genPerMinute || 0)}</b> tok/min。
+            单日最高出现在 <b>{fmtDateFull(bestDay)}</b>，
+            当日 <b>{tokens(bestDayData?.total_tokens || 0)}</b> token、
+            <b>{fmtInt(bestDayData?.requests || 0)}</b> 次请求。
           </div>
         </div>
 
         <div className="panel">
           <div className="section-head" style={{ marginBottom: 16 }}>
-            <h2 style={{ fontSize: 16 }}>时段速率</h2>
+            <h2 style={{ fontSize: 16 }}>每日成本</h2>
+            <span className="sub">API 等价成本，不是厂商账单</span>
+          </div>
+          <TrendChart
+            labels={days.map((d) => d.day)}
+            series={[
+              {
+                key: "cost",
+                label: "成本 / 天",
+                color: "var(--c-ochre)",
+                values: days.map((d) => d.cost_usd),
+              },
+            ]}
+            height={240}
+            yFormat={fmtCost}
+          />
+          <div className="peak-note" style={{ marginTop: 16 }}>
+            本月 <b>{fmtCost(cur.cost)}</b>
+            {prev && (
+              <>
+                ，上月同期 <b>{fmtCost(prev.cost * dayRatio)}</b>（按 {curDays.length} 天折算）
+              </>
+            )}
+            。
+          </div>
+        </div>
+      </div>
+
+      <div className="grid-2">
+        <div className="panel">
+          <div className="section-head" style={{ marginBottom: 16 }}>
+            <h2 style={{ fontSize: 16 }}>各工具用量</h2>
+            <span className="sub">按输入（含缓存读）排序</span>
+          </div>
+          <RankBars
+            rows={(() => {
+              // timeseriesByTool 是 {day, byTool:{toolId: cell}} 的形状，
+              // 先按工具把每天累加出来，再排序取前 5。
+              const acc = new Map<string, { tokens: number; requests: number; cost: number }>();
+              for (const p of data.timeseriesByTool) {
+                for (const [id, cell] of Object.entries(p.byTool || {})) {
+                  const a = acc.get(id) || { tokens: 0, requests: 0, cost: 0 };
+                  a.tokens += cell.total_tokens || 0;
+                  a.requests += cell.requests || 0;
+                  a.cost += cell.cost_usd || 0;
+                  acc.set(id, a);
+                }
+              }
+              return [...acc.entries()]
+                .sort((a, b) => b[1].tokens - a[1].tokens)
+                .slice(0, 5)
+                .map(([id, a]) => ({
+                  key: id,
+                  label: toolName(id),
+                  sub: fmtCost(a.cost),
+                  value: a.tokens,
+                  color: toolColor(id),
+                  extra: `${fmtInt(a.requests)} 次`,
+                }));
+            })()}
+            format={tokens}
+          />
+        </div>
+
+        <div className="panel">
+          <div className="section-head" style={{ marginBottom: 16 }}>
+            <h2 style={{ fontSize: 16 }}>时段分布</h2>
             <span className="sub">活跃分钟内的生成 tok/min</span>
           </div>
           <HourBars hours={r.byHour} valueKey="genPerMinute" format={tokens} />
-          <div style={{ marginTop: 22 }}>
-            <RankBars
-              rows={r.byTool.slice(0, 5).map((t) => ({
-                key: t.tool,
-                label: toolName(t.tool),
-                sub: `${fmtInt(t.activeMinutes)} 分钟`,
-                value: t.genPerMinute,
-                color: toolColor(t.tool),
-                extra: `${fmtInt(t.requests)} 次`,
-              }))}
-              format={tokens}
-            />
-          </div>
         </div>
       </div>
 
       {o.peakBreakdown.length > 0 && (
         <div className="peak-note">
-          峰值秒由{" "}
+          生成速度的峰值秒（{tokens(o.peakPerSecond)} tok/s）由{" "}
           {o.peakBreakdown.slice(0, 3).map((b, i) => (
             <span key={b.tool}>
               {i > 0 && "、"}

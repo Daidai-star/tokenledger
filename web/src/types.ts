@@ -47,9 +47,16 @@ export interface SeriesPoint {
   day: string;
   requests: number;
   total_tokens: number;
+  /** 新鲜输入（库里的原始值，不含缓存读） */
   input_tokens: number;
   output_tokens: number;
   cache_read_tokens: number;
+  /**
+   * 含缓存读的 input = 新鲜输入 + 缓存读。
+   * 与 CC Switch / Codex 原始日志同口径——它们的 `input_tokens` 本就含 cached。
+   * 展示时优先用这个，否则同一个页面会出现两种 input 口径。
+   */
+  input_incl_cache: number;
   cost_usd: number;
   failures: number;
 }

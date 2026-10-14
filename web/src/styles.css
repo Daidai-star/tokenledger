@@ -1775,6 +1775,31 @@ code {
   border-top: 1px dashed var(--line-soft);
 }
 
+/*
+ * 环比涨跌。上涨用警示色（花钱变多不是好事），
+ * 下降用中性绿——这里刻意不把「降本」染成绿色，避免和「收入」混淆。
+ */
+.up {
+  color: var(--accent);
+}
+
+.down {
+  color: var(--c-sage);
+}
+
+/* Token 构成底部的「输入合计（含缓存读）」行 */
+.tb-row-total {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--line-soft);
+}
+
+.tb-row-total em {
+  font-style: normal;
+  color: var(--ink-4);
+  font-size: 0.92em;
+}
+
 @media (max-width: 900px) {
   .caliber-note {
     grid-template-columns: minmax(0, 1fr);
