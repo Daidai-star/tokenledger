@@ -72,6 +72,43 @@
   /* stagger 步长：首屏少量内容 40ms，密集列表 24ms */
   --stagger: 40ms;
   --stagger-fast: 24ms;
+
+  /*
+   * 间距刻度：基数 8px，另有 2/4/6px 三个紧致档用于行内微调。
+   *
+   * 为什么要有刻度：改造前 193 处间距声明里有 125 处落在这个集合之外
+   * （1/3/5/7/9/10/13/14/18/22/26/34/44px 之类），而且没有任何变量——
+   * 每个值都是就地写死的。这正是「说不上哪里不对」的来源：不是审美问题，
+   * 是没有节奏可循。
+   *
+   * 合法值只有这 10 个。加新间距前先想清楚落在哪一档；
+   * 需要第四个紧致档时说明为什么现有三档不够。
+   * 基准来自 posthog 的 DESIGN.md（Base unit 8px + finer 2/4/6）。
+   */
+  --sp-3xs: 2px; /* 图标与文字的贴合、点状分隔 */
+  --sp-2xs: 4px; /* 紧凑控件内边距、徽标 */
+  --sp-xs: 6px; /* 标签之间的最小间隔 */
+  --sp-sm: 8px; /* 基数：图例项、按钮组内 */
+  --sp-md: 12px; /* 卡片内边距（紧凑档） */
+  --sp-lg: 16px; /* 卡片内边距（标准）、面板间隙 */
+  --sp-xl: 24px; /* 区块内元素组间隙 */
+  --sp-2xl: 32px; /* 大面板之间 */
+  --sp-3xl: 48px; /* 区块内的大分隔 */
+  --sp-section: 80px; /* 区块之间的纵向节奏，页面最大间距 token */
+
+  /*
+   * 严重度色阶：表达「浪费严重度」「预算超线」这类状态。
+   *
+   * 以前这些位置直接用 --accent（品牌珊瑚色），等于让品牌色兼任状态色——
+   * 「严重」和「品牌」是两种完全不同的语义，混用会让强调色失去意义。
+   * 拆出来之后 --accent 只剩品牌标识 / 主 CTA / 焦点环 / 链接强调四处。
+   */
+  --sev-severe: #b23c2c; /* 超线 / 严重浪费 */
+  --sev-moderate: #b07d2e; /* 中等 */
+  --sev-mild: #6f7d52; /* 轻微；刻意低饱和，不与严重度抢注意力 */
+  --sev-severe-soft: #f7e8e4;
+  --sev-moderate-soft: #f6efdd;
+  --sev-mild-soft: #eef0e6;
 }
 
 * {
@@ -105,7 +142,7 @@ code {
   font-family: var(--font-mono);
   font-size: 0.9em;
   background: var(--surface-sunk);
-  padding: 1px 5px;
+  padding: var(--sp-3xs) var(--sp-2xs);
   border-radius: 3px;
   color: var(--accent);
 }
@@ -116,7 +153,8 @@ code {
   position: relative;
   max-width: 1280px;
   margin: 0 auto;
-  padding: 0 48px 100px;
+  /* 底部留白用最大 token——页尾是最后一个区块，之后的空气属于它 */
+  padding: 0 var(--sp-3xl) var(--sp-section);
   z-index: 1;
 }
 
@@ -142,18 +180,18 @@ code {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  gap: 20px;
+  gap: var(--sp-xl);
   flex-wrap: wrap;
-  padding: 34px 0 22px;
+  padding: var(--sp-2xl) 0 var(--sp-xl);
   border-bottom: 1px solid var(--line);
-  margin-bottom: 44px;
+  margin-bottom: var(--sp-3xl);
   animation: fade-up var(--dur-enter) var(--ease) both;
 }
 
 .brand {
   display: flex;
   align-items: baseline;
-  gap: 14px;
+  gap: var(--sp-lg);
 }
 
 .brand-mark {
@@ -183,7 +221,7 @@ code {
 
 .topbar-meta {
   display: flex;
-  gap: 18px;
+  gap: var(--sp-lg);
   flex-wrap: wrap;
   font-size: 12px;
   color: var(--ink-3);
@@ -277,7 +315,7 @@ code {
   color: var(--ink-3);
   letter-spacing: 0.12em;
   text-transform: uppercase;
-  margin-top: 5px;
+  margin-top: var(--sp-2xs);
 }
 
 .profile-body {
@@ -301,7 +339,7 @@ code {
 }
 
 .profile-lede {
-  margin: 10px 0 0;
+  margin: var(--sp-md) 0 0;
   font-size: 15px;
   line-height: 1.65;
   color: var(--ink-2);
@@ -311,13 +349,13 @@ code {
 .profile-facts {
   display: flex;
   gap: 0;
-  margin-top: 28px;
+  margin-top: var(--sp-2xl);
   border-top: 1px solid var(--line);
 }
 
 .profile-fact {
   flex: 1;
-  padding: 16px 20px 0 0;
+  padding: 16px var(--sp-xl) 0 0;
   border-right: 1px solid var(--line-soft);
   animation: fade-up var(--dur-enter) var(--ease) both;
 }
@@ -339,7 +377,7 @@ code {
 }
 
 .profile-fact dd {
-  margin: 3px 0 0;
+  margin: var(--sp-2xs) 0 0;
   font-family: var(--font-serif);
   font-size: 27px;
   font-weight: 400;
@@ -352,20 +390,20 @@ code {
   font-size: 12px;
   color: var(--ink-3);
   letter-spacing: 0;
-  margin-left: 3px;
+  margin-left: var(--sp-2xs);
 }
 
 .profile-tools {
   display: flex;
-  gap: 20px;
+  gap: var(--sp-xl);
   flex-wrap: wrap;
-  margin-top: 26px;
+  margin-top: var(--sp-xl);
 }
 
 .profile-tool {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
+  gap: var(--sp-sm);
   font-size: 12.5px;
   color: var(--ink-2);
   animation: fade-up var(--dur-enter) var(--ease) both;
@@ -388,10 +426,10 @@ code {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 18px;
+  gap: var(--sp-lg);
   flex-wrap: wrap;
-  padding-bottom: 14px;
-  margin-bottom: 22px;
+  padding-bottom: var(--sp-lg);
+  margin-bottom: var(--sp-xl);
   border-bottom: 1px solid var(--line);
   animation: fade-up var(--dur-enter) var(--ease) 0.1s both;
 }
@@ -427,7 +465,7 @@ code {
   background: transparent;
   border: 0;
   border-right: 1px solid var(--line);
-  padding: 7px 15px;
+  padding: var(--sp-sm) var(--sp-lg);
   cursor: pointer;
   transition: all 0.2s var(--ease);
 }
@@ -453,7 +491,7 @@ code {
   background: transparent;
   border: 1px solid transparent;
   border-radius: 999px;
-  padding: 6px 13px;
+  padding: 6px var(--sp-md);
   cursor: pointer;
   display: inline-flex;
   align-items: center;
@@ -496,12 +534,12 @@ code {
   gap: 0;
   border-top: 1px solid var(--line);
   border-bottom: 1px solid var(--line);
-  margin-bottom: 28px;
+  margin-bottom: var(--sp-2xl);
   animation: fade-up var(--dur-enter) var(--ease) 0.15s both;
 }
 
 .stat {
-  padding: 20px 24px 20px 0;
+  padding: var(--sp-xl) 24px var(--sp-xl) 0;
   border-right: 1px solid var(--line-soft);
   animation: fade-up var(--dur-enter) var(--ease) both;
   transition: background 0.25s var(--ease);
@@ -537,7 +575,7 @@ code {
 /* ---------------------------------------------------------- 区块 */
 
 .section {
-  margin-bottom: 56px;
+  margin-bottom: var(--sp-section);
   animation: fade-up var(--dur-enter) var(--ease) both;
 }
 
@@ -545,9 +583,9 @@ code {
   display: flex;
   align-items: flex-end;
   justify-content: space-between;
-  gap: 20px;
+  gap: var(--sp-xl);
   flex-wrap: wrap;
-  margin-bottom: 20px;
+  margin-bottom: var(--sp-xl);
   padding-bottom: 12px;
   border-bottom: 1px solid var(--line);
 }
@@ -564,7 +602,7 @@ code {
 .section-head .sub {
   font-size: 12.5px;
   color: var(--ink-3);
-  margin-top: 3px;
+  margin-top: var(--sp-2xs);
 }
 
 .section-head .actions {
@@ -576,12 +614,12 @@ code {
 .grid-2 {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
-  gap: 40px;
+  gap: var(--sp-3xl);
   align-items: start;
 }
 
 .panel {
-  padding: 22px 24px;
+  padding: var(--sp-xl) 24px;
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--radius-md);
@@ -592,13 +630,13 @@ code {
   background: var(--surface-sunk);
   border: 1px solid var(--line-soft);
   border-radius: var(--radius-md);
-  padding: 20px;
+  padding: var(--sp-xl);
 }
 
 .empty-hint {
   color: var(--ink-3);
   font-size: 13px;
-  padding: 30px;
+  padding: var(--sp-2xl);
   text-align: center;
   font-style: italic;
 }
@@ -648,7 +686,7 @@ code {
   background: var(--ink);
   color: var(--paper);
   border-radius: var(--radius-md);
-  padding: 9px 12px;
+  padding: var(--sp-sm) 12px;
   font-size: 11.5px;
   pointer-events: none;
   z-index: 20;
@@ -669,14 +707,14 @@ code {
 
 .tip-title {
   color: rgba(255, 255, 255, 0.55);
-  margin-bottom: 5px;
+  margin-bottom: var(--sp-2xs);
   letter-spacing: 0.03em;
 }
 
 .tip-row {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: var(--sp-sm);
 }
 
 .tip-label {
@@ -698,9 +736,9 @@ code {
 
 .legend-strip {
   display: flex;
-  gap: 18px;
+  gap: var(--sp-lg);
   align-items: center;
-  margin-top: 14px;
+  margin-top: var(--sp-lg);
   flex-wrap: wrap;
   font-size: 12px;
   color: var(--ink-2);
@@ -728,14 +766,14 @@ code {
   display: grid;
   grid-template-columns: minmax(140px, 1.7fr) 56px minmax(80px, 1fr) 70px 60px;
   align-items: center;
-  gap: 14px;
+  gap: var(--sp-lg);
   font: inherit;
   font-size: 13px;
   color: var(--ink-2);
   background: transparent;
   border: 0;
   border-bottom: 1px solid var(--line-soft);
-  padding: 9px 4px;
+  padding: var(--sp-sm) 4px;
   cursor: pointer;
   text-align: left;
   animation: fade-up var(--dur-enter) var(--ease) both;
@@ -805,7 +843,7 @@ code {
 .donut-wrap {
   display: flex;
   flex-direction: column;
-  gap: 22px;
+  gap: var(--sp-xl);
   align-items: center;
 }
 
@@ -847,7 +885,7 @@ code {
 .donut-center-sub {
   font-size: 11.5px;
   color: var(--ink-2);
-  margin-top: 3px;
+  margin-top: var(--sp-2xs);
 }
 
 .donut-legend {
@@ -860,8 +898,8 @@ code {
   display: grid;
   grid-template-columns: 7px minmax(70px, 1fr) auto 48px;
   align-items: center;
-  gap: 10px;
-  padding: 7px 6px;
+  gap: var(--sp-md);
+  padding: var(--sp-sm) 6px;
   border-radius: var(--radius);
   border-bottom: 1px solid var(--line-soft);
   font-size: 12.5px;
@@ -909,7 +947,7 @@ code {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 5px;
+  gap: var(--sp-2xs);
   height: 100%;
   cursor: default;
 }
@@ -948,7 +986,7 @@ code {
 .heat-months {
   position: relative;
   height: 15px;
-  margin-bottom: 5px;
+  margin-bottom: var(--sp-2xs);
   min-width: 420px;
 }
 
@@ -962,7 +1000,7 @@ code {
   display: grid;
   grid-auto-flow: column;
   grid-template-rows: repeat(7, 10px);
-  gap: 3px;
+  gap: var(--sp-2xs);
   min-width: 420px;
 }
 
@@ -983,13 +1021,14 @@ code {
 .heat-cell.lv1 { background: #e8ddd4; }
 .heat-cell.lv2 { background: #d8bda9; }
 .heat-cell.lv3 { background: #c58f6d; }
-.heat-cell.lv4 { background: var(--accent); }
+/* 热力图最深一档是「最活跃」，属强度不是品牌 */
+.heat-cell.lv4 { background: var(--sev-severe); }
 
 .heat-foot {
   display: flex;
   align-items: center;
-  gap: 3px;
-  margin-top: 9px;
+  gap: var(--sp-2xs);
+  margin-top: var(--sp-sm);
   font-size: 10px;
   color: var(--ink-3);
 }
@@ -1002,7 +1041,7 @@ code {
 .matrix {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: var(--sp-2xs);
   overflow-x: auto;
 }
 
@@ -1010,7 +1049,7 @@ code {
 .matrix-row {
   display: grid;
   grid-template-columns: 92px repeat(10, minmax(56px, 1fr));
-  gap: 3px;
+  gap: var(--sp-2xs);
   min-width: 700px;
 }
 
@@ -1103,7 +1142,7 @@ code {
 /* 纵向堆叠条 */
 .token-breakdown {
   display: flex;
-  gap: 22px;
+  gap: var(--sp-xl);
   align-items: stretch;
   min-height: 168px;
 }
@@ -1139,10 +1178,10 @@ code {
   display: grid;
   grid-template-columns: 7px 1fr auto 52px;
   align-items: center;
-  gap: 10px;
+  gap: var(--sp-md);
   font-size: 12.5px;
   color: var(--ink-2);
-  padding: 5px 0;
+  padding: var(--sp-2xs) 0;
   border-bottom: 1px solid var(--line-soft);
   animation: fade-up var(--dur-enter) var(--ease) both;
 }
@@ -1207,8 +1246,8 @@ code {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 1px;
-  padding: 12px 16px 10px;
+  gap: var(--sp-3xs);
+  padding: 12px 16px var(--sp-md);
   font: inherit;
   color: var(--ink-3);
   background: transparent;
@@ -1258,8 +1297,8 @@ code {
   grid-template-columns: auto minmax(0, 1fr) auto;
   gap: 16px;
   align-items: center;
-  margin: 0 0 28px;
-  padding: 16px 20px;
+  margin: 0 0 var(--sp-2xl);
+  padding: 16px var(--sp-xl);
   border-radius: var(--radius-md);
   border: 1px solid var(--line);
   background: var(--surface);
@@ -1285,14 +1324,14 @@ code {
   letter-spacing: 0.06em;
   color: var(--ink-3);
   white-space: nowrap;
-  padding: 3px 8px;
+  padding: var(--sp-2xs) 8px;
   border-radius: 3px;
   background: rgba(0, 0, 0, 0.035);
 }
 
 .insight-warn .insight-kicker {
-  color: var(--accent);
-  background: rgba(193, 95, 60, 0.1);
+  color: var(--sev-moderate);
+  background: rgba(176, 125, 46, 0.12);
 }
 
 .insight-text {
@@ -1330,23 +1369,25 @@ code {
 /* ---- 额度视角 ---- */
 
 .pace-stats {
-  margin-bottom: 28px;
+  margin-bottom: var(--sp-2xl);
 }
 
+/* 预测值刻意用次级色：它是估算，不该用最响亮的颜色假装它是确凿的事实。
+   这是产品诚实原则在颜色上的一致——和「API 等价成本 ≠ 厂商账单」同一套逻辑。 */
 .pace-projected {
-  color: var(--accent);
+  color: var(--ink-3);
 }
 
 .pace-bars {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: var(--sp-lg);
 }
 
 .pace-bar-row {
   display: grid;
   grid-template-columns: 52px minmax(0, 1fr) auto;
-  gap: 14px;
+  gap: var(--sp-lg);
   align-items: center;
 }
 
@@ -1394,8 +1435,8 @@ code {
 }
 
 .pace-warn {
-  margin-top: 18px;
-  padding: 12px 14px;
+  margin-top: var(--sp-lg);
+  padding: 12px var(--sp-lg);
   border-radius: var(--radius-md);
   background: var(--accent-soft);
   border: 1px solid var(--accent-line);
@@ -1405,8 +1446,8 @@ code {
 }
 
 .pace-ok {
-  margin-top: 18px;
-  padding: 12px 14px;
+  margin-top: var(--sp-lg);
+  padding: 12px var(--sp-lg);
   border-radius: var(--radius-md);
   background: var(--surface-sunk);
   border: 1px solid var(--line-soft);
@@ -1424,19 +1465,19 @@ code {
 
 .pace-sub {
   border-top: 1px solid var(--line-soft);
-  padding-top: 22px;
+  padding-top: var(--sp-xl);
 }
 
 .pace-tools {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: var(--sp-md);
 }
 
 .pace-tool {
   display: grid;
   grid-template-columns: 130px minmax(0, 1fr) auto 48px;
-  gap: 14px;
+  gap: var(--sp-lg);
   align-items: center;
 }
 
@@ -1465,7 +1506,7 @@ code {
 /* ---- 预算护栏 ---- */
 
 .guard-stats {
-  margin-bottom: 28px;
+  margin-bottom: var(--sp-2xl);
 }
 
 .guard-max {
@@ -1484,7 +1525,7 @@ code {
   /* 项目名要放得下 …/workspace/image 这样的两段路径，
      64px 会截成「…/works…」；给足 150px 并允许省略。 */
   grid-template-columns: 150px minmax(0, 1fr) auto;
-  gap: 14px;
+  gap: var(--sp-lg);
   align-items: center;
 }
 
@@ -1527,8 +1568,9 @@ code {
 
 .guard-bar-median { background: var(--c-sage); }
 .guard-bar-warn   { background: #b07a3c; }
-.guard-bar-max    { background: var(--accent); }
-.guard-bar-proj   { background: var(--accent); opacity: 0.75; height: 8px; }
+/* 护栏的提醒线是「阈值」语义，属于状态不是品牌 */
+.guard-bar-max    { background: var(--sev-severe); }
+.guard-bar-proj   { background: var(--sev-severe); opacity: 0.75; height: 8px; }
 
 @keyframes bar-grow {
   from {
@@ -1538,19 +1580,19 @@ code {
 
 .guard-sub {
   border-top: 1px solid var(--line-soft);
-  padding-top: 22px;
+  padding-top: var(--sp-xl);
 }
 
 .guard-projects {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: var(--sp-md);
 }
 
 /* ---- 浪费诊断 ---- */
 
 .waste-stats {
-  margin-bottom: 28px;
+  margin-bottom: var(--sp-2xl);
 }
 
 /* 「最该改的项目」卡要放完整项目名，窄屏下让它占满整行，
@@ -1571,10 +1613,12 @@ code {
   color: var(--ink-3);
 }
 
+/* 严重度三档：用状态色而不是品牌色。「严重」和「品牌」是两种语义，
+   混用会让强调色失去意义，也没法和真正的 CTA / 焦点区分开。 */
 .waste-ok    { color: var(--c-sage); }
-.waste-mild  { color: var(--ink); }
-.waste-moderate { color: #b07a3c; }
-.waste-severe  { color: var(--accent); }
+.waste-mild  { color: var(--sev-mild); }
+.waste-moderate { color: var(--sev-moderate); }
+.waste-severe  { color: var(--sev-severe); }
 
 .waste-path {
   /* 比同级数字小一号：路径天生比数字长，20px 在窄屏两列下会被截成
@@ -1600,7 +1644,7 @@ code {
   grid-template-columns: 3px 1fr auto;
   gap: 16px;
   align-items: start;
-  padding: 14px 0;
+  padding: var(--sp-lg) 0;
   border-bottom: 1px solid var(--line-soft);
 }
 
@@ -1617,7 +1661,7 @@ code {
 .waste-advice-row.waste-ok        .waste-advice-sev { background: var(--c-sage); }
 .waste-advice-row.waste-mild      .waste-advice-sev { background: var(--ink-3); }
 .waste-advice-row.waste-moderate  .waste-advice-sev { background: #b07a3c; }
-.waste-advice-row.waste-severe    .waste-advice-sev { background: var(--accent); }
+.waste-advice-row.waste-severe    .waste-advice-sev { background: var(--sev-severe); }
 
 .waste-advice-body {
   min-width: 0;
@@ -1661,7 +1705,7 @@ code {
   font-size: 10.5px;
   letter-spacing: 0.07em;
   text-transform: uppercase;
-  padding: 8px 10px;
+  padding: 8px var(--sp-md);
   border-bottom: 1px solid var(--line);
 }
 
@@ -1672,7 +1716,7 @@ code {
 
 .table td {
   text-align: right;
-  padding: 10px;
+  padding: var(--sp-md);
   border-bottom: 1px solid var(--line-soft);
   color: var(--ink-2);
   font-variant-numeric: tabular-nums;
@@ -1698,7 +1742,7 @@ code {
   gap: 0;
   border-top: 1px solid var(--line);
   border-bottom: 1px solid var(--line);
-  margin-bottom: 26px;
+  margin-bottom: var(--sp-xl);
 }
 
 /*
@@ -1708,10 +1752,10 @@ code {
 .caliber-note {
   display: grid;
   grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
-  gap: 26px;
+  gap: var(--sp-xl);
   align-items: start;
-  padding: 18px 20px;
-  margin-bottom: 26px;
+  padding: var(--sp-lg) var(--sp-xl);
+  margin-bottom: var(--sp-xl);
   background: var(--surface-2, rgba(0, 0, 0, 0.02));
   border: 1px solid var(--line-soft);
   border-radius: 4px;
@@ -1734,7 +1778,7 @@ code {
 }
 
 .caliber-side {
-  padding-left: 22px;
+  padding-left: var(--sp-xl);
   border-left: 1px solid var(--line-soft);
   min-width: 0;
 }
@@ -1750,7 +1794,7 @@ code {
   font-family: var(--font-serif);
   font-size: 22px;
   letter-spacing: -0.02em;
-  margin-top: 3px;
+  margin-top: var(--sp-2xs);
   line-height: 1.15;
 }
 
@@ -1759,13 +1803,13 @@ code {
   font-size: 11px;
   color: var(--ink-3);
   letter-spacing: 0;
-  margin-left: 5px;
+  margin-left: var(--sp-2xs);
 }
 
 .caliber-side .s {
   font-size: 11px;
   color: var(--ink-3);
-  margin-top: 5px;
+  margin-top: var(--sp-2xs);
   line-height: 1.5;
 }
 
@@ -1800,10 +1844,21 @@ code {
   font-size: 0.92em;
 }
 
+/*
+ * 窄屏放不下「（含缓存读）」这 6 个字（119px 的内容只剩 116px 的格子），
+ * 隐藏后缀而不是让它截断——口径在区块副标题「token 为含缓存读口径」里
+ * 已经写明，这里不必重复，数字本身才是要保证可读的。
+ */
+@media (max-width: 900px) {
+  .tb-row-total .legend-label em {
+    display: none;
+  }
+}
+
 @media (max-width: 900px) {
   .caliber-note {
     grid-template-columns: minmax(0, 1fr);
-    gap: 18px;
+    gap: var(--sp-lg);
   }
 
   .caliber-side {
@@ -1815,7 +1870,7 @@ code {
 }
 
 .rate-cell {
-  padding: 18px 22px 18px 0;
+  padding: var(--sp-lg) var(--sp-xl) var(--sp-lg) 0;
   border-right: 1px solid var(--line-soft);
   animation: fade-up var(--dur-enter) var(--ease) both;
 }
@@ -1836,7 +1891,7 @@ code {
   font-size: 28px;
   font-weight: 400;
   letter-spacing: -0.025em;
-  margin-top: 3px;
+  margin-top: var(--sp-2xs);
   line-height: 1.1;
 }
 
@@ -1867,7 +1922,7 @@ code {
 .rate-spark {
   display: flex;
   align-items: flex-end;
-  gap: 1px;
+  gap: var(--sp-3xs);
   height: 42px;
 }
 
@@ -1887,8 +1942,8 @@ code {
 .peak-note {
   font-size: 12px;
   color: var(--ink-3);
-  margin-top: 10px;
-  padding-top: 10px;
+  margin-top: var(--sp-md);
+  padding-top: var(--sp-md);
   border-top: 1px solid var(--line-soft);
 }
 
@@ -1968,7 +2023,7 @@ code {
   text-align: right;
   flex-shrink: 0;
   display: flex;
-  gap: 14px;
+  gap: var(--sp-lg);
   align-items: baseline;
 }
 
@@ -2053,7 +2108,7 @@ code {
 /* ---------------------------------------------------------- 购买力 */
 
 .mall-empty {
-  padding: 40px 26px;
+  padding: var(--sp-3xl) var(--sp-xl);
   border: 1px dashed var(--line);
   border-radius: var(--radius-md);
   text-align: center;
@@ -2066,7 +2121,7 @@ code {
 .mall-head-right {
   display: flex;
   align-items: center;
-  gap: 20px;
+  gap: var(--sp-xl);
 }
 
 .mall-share {
@@ -2100,8 +2155,8 @@ code {
   justify-content: space-between;
   gap: 32px;
   flex-wrap: wrap;
-  padding-bottom: 26px;
-  margin-bottom: 30px;
+  padding-bottom: var(--sp-xl);
+  margin-bottom: var(--sp-2xl);
   border-bottom: 1px solid var(--line);
 }
 
@@ -2127,7 +2182,7 @@ code {
 }
 
 .mall-hero .s {
-  margin-top: 10px;
+  margin-top: var(--sp-md);
   font-family: var(--font-serif);
   font-size: 15px;
   color: var(--ink-2);
@@ -2135,14 +2190,14 @@ code {
 
 .mall-hero-side {
   display: flex;
-  gap: 40px;
+  gap: var(--sp-3xl);
   text-align: right;
 }
 
 /* 对数标尺 */
 
 .mall-rail {
-  margin-bottom: 30px;
+  margin-bottom: var(--sp-2xl);
 }
 
 .rail-track {
@@ -2175,7 +2230,7 @@ code {
   top: 15px;
   width: 5px;
   height: 5px;
-  margin-left: -2.5px;
+  margin-left: -2.var(--sp-2xs);
   border-radius: 50%;
   background: var(--ink-4);
 }
@@ -2192,7 +2247,8 @@ code {
   transform: translateX(-50%);
   border-left: 5px solid transparent;
   border-right: 5px solid transparent;
-  border-top: 7px solid var(--accent);
+  /* 指针指向「超线的那根柱」，是阈值标记而非品牌 */
+  border-top: 7px solid var(--sev-severe);
 }
 
 .rail-you span {
@@ -2236,10 +2292,10 @@ code {
 
 .mall-goal {
   display: flex;
-  gap: 18px;
+  gap: var(--sp-lg);
   align-items: flex-start;
-  padding: 18px 22px;
-  margin-bottom: 30px;
+  padding: var(--sp-lg) var(--sp-xl);
+  margin-bottom: var(--sp-2xl);
   background: var(--accent-soft);
   border: 1px solid var(--accent-line);
   border-radius: var(--radius-md);
@@ -2260,7 +2316,7 @@ code {
   font-family: var(--font-serif);
   font-size: 17px;
   color: var(--ink);
-  margin-bottom: 10px;
+  margin-bottom: var(--sp-md);
 }
 
 .goal-title b {
@@ -2282,7 +2338,7 @@ code {
 }
 
 .goal-sub {
-  margin-top: 9px;
+  margin-top: var(--sp-sm);
   font-size: 12px;
   color: var(--ink-3);
 }
@@ -2290,8 +2346,8 @@ code {
 /* 购物车小票 */
 
 .mall-cart {
-  padding: 22px 24px 20px;
-  margin-bottom: 34px;
+  padding: var(--sp-xl) 24px var(--sp-xl);
+  margin-bottom: var(--sp-2xl);
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--radius-md);
@@ -2301,8 +2357,8 @@ code {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  padding-bottom: 14px;
-  margin-bottom: 14px;
+  padding-bottom: var(--sp-lg);
+  margin-bottom: var(--sp-lg);
   border-bottom: 1px dashed var(--line-strong);
 }
 
@@ -2324,7 +2380,7 @@ code {
   display: flex;
   align-items: baseline;
   gap: 12px;
-  padding: 5px 0;
+  padding: var(--sp-2xs) 0;
   font-size: 13px;
 }
 
@@ -2355,8 +2411,8 @@ code {
 }
 
 .cart-summary {
-  margin-top: 14px;
-  padding-top: 13px;
+  margin-top: var(--sp-lg);
+  padding-top: var(--sp-md);
   border-top: 1px dashed var(--line-strong);
   font-size: 12.5px;
   color: var(--ink-3);
@@ -2370,7 +2426,7 @@ code {
   flex-direction: column;
   /* 15 件商品分 6 个档，30px 档间距会让整栏长到 5000px。
      收到 18px 仍能看出「档」的分界，但整栏能收进两屏。 */
-  gap: 18px;
+  gap: var(--sp-lg);
 }
 
 .mall-band {
@@ -2380,9 +2436,9 @@ code {
 .band-head {
   display: flex;
   align-items: baseline;
-  gap: 14px;
+  gap: var(--sp-lg);
   padding-bottom: 8px;
-  margin-bottom: 11px;
+  margin-bottom: var(--sp-md);
   border-bottom: 1px solid var(--line);
   flex-wrap: wrap;
 }
@@ -2440,13 +2496,13 @@ code {
 .band-items {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
-  gap: 10px;
+  gap: var(--sp-md);
 }
 
 .mall-item {
   display: flex;
   flex-direction: column;
-  padding: 15px 16px 14px;
+  padding: var(--sp-lg) 16px var(--sp-lg);
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--radius-md);
@@ -2474,7 +2530,7 @@ code {
 .mi-emoji {
   font-size: 21px;
   line-height: 1;
-  margin-bottom: 10px;
+  margin-bottom: var(--sp-md);
 }
 
 .mi-name {
@@ -2492,7 +2548,7 @@ code {
 }
 
 .mi-get {
-  margin-top: 3px;
+  margin-top: var(--sp-2xs);
   font-size: 11.5px;
   color: var(--ink-3);
 }
@@ -2508,7 +2564,7 @@ code {
 .mi-hint {
   /* 推到卡片底部，这样同一行里各张卡的分隔线能对齐 */
   margin-top: auto;
-  padding-top: 10px;
+  padding-top: var(--sp-md);
   border-top: 1px solid var(--line-soft);
   font-size: 11px;
   color: var(--ink-4);
@@ -2516,12 +2572,12 @@ code {
 }
 
 .mi-price + .mi-get {
-  margin-bottom: 10px;
+  margin-bottom: var(--sp-md);
 }
 
 .mall-foot {
-  margin-top: 26px;
-  padding-top: 18px;
+  margin-top: var(--sp-xl);
+  padding-top: var(--sp-lg);
   border-top: 1px solid var(--line);
   font-size: 11.5px;
   color: var(--ink-4);
@@ -2531,7 +2587,7 @@ code {
 /* ---------------------------------------------------------- 采集流程 */
 
 .scan-flow {
-  padding: 26px 26px 24px;
+  padding: var(--sp-xl) var(--sp-xl) 24px;
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--radius-md);
@@ -2542,7 +2598,7 @@ code {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  margin-bottom: 22px;
+  margin-bottom: var(--sp-xl);
 }
 
 .scan-flow.running {
@@ -2580,7 +2636,7 @@ code {
 .btn {
   font: inherit;
   font-size: 12.5px;
-  padding: 7px 15px;
+  padding: var(--sp-sm) var(--sp-lg);
   border-radius: var(--radius-md);
   border: 1px solid var(--line-strong);
   background: transparent;
@@ -2610,9 +2666,11 @@ code {
   color: var(--paper);
 }
 
+/* 危险操作是「状态红」，不是品牌珊瑚色。
+   以前两者同色，用户在按钮上看到的红到底是警告还是品牌已经分不清。 */
 .btn.danger {
-  color: var(--accent);
-  border-color: var(--accent);
+  color: var(--sev-severe);
+  border-color: var(--sev-severe);
 }
 
 .btn.ghost {
@@ -2626,7 +2684,7 @@ code {
 
 .pipeline {
   display: flex;
-  margin-bottom: 22px;
+  margin-bottom: var(--sp-xl);
 }
 
 .stage {
@@ -2735,8 +2793,8 @@ code {
 .scan-bar-meta {
   display: flex;
   justify-content: space-between;
-  gap: 14px;
-  margin-top: 9px;
+  gap: var(--sp-lg);
+  margin-top: var(--sp-sm);
   font-size: 12px;
   color: var(--ink-3);
   flex-wrap: wrap;
@@ -2752,9 +2810,9 @@ code {
 
 .tool-flow {
   display: flex;
-  gap: 22px;
+  gap: var(--sp-xl);
   flex-wrap: wrap;
-  padding-top: 14px;
+  padding-top: var(--sp-lg);
   border-top: 1px solid var(--line-soft);
 }
 
@@ -2804,16 +2862,16 @@ code {
   color: var(--ink-4);
   border: 1px solid var(--line);
   border-radius: 999px;
-  padding: 1px 7px;
+  padding: var(--sp-3xs) var(--sp-sm);
 }
 
 .scan-error {
-  margin-top: 14px;
+  margin-top: var(--sp-lg);
   font-size: 12.5px;
-  color: var(--accent);
-  background: var(--accent-soft);
+  color: var(--sev-severe);
+  background: var(--sev-severe-soft);
   border: 1px solid var(--accent-line);
-  padding: 9px 12px;
+  padding: var(--sp-sm) 12px;
   border-radius: var(--radius-md);
 }
 
@@ -2826,7 +2884,7 @@ code {
   flex-wrap: wrap;
   font-size: 11.5px;
   color: var(--ink-4);
-  padding-top: 22px;
+  padding-top: var(--sp-xl);
   border-top: 1px solid var(--line);
 }
 
@@ -2985,11 +3043,11 @@ code {
 
 @media (max-width: 900px) {
   .app {
-    padding: 0 20px 70px;
+    padding: 0 var(--sp-xl) var(--sp-section);
   }
   .profile {
     grid-template-columns: 1fr;
-    gap: 26px;
+    gap: var(--sp-xl);
     justify-items: center;
     text-align: center;
   }
@@ -2998,7 +3056,7 @@ code {
   .profile-facts { width: 100%; }
   .profile-fact { padding-right: 12px; }
   .profile-tools { justify-content: center; }
-  .grid-2 { grid-template-columns: 1fr; gap: 28px; }
+  .grid-2 { grid-template-columns: 1fr; gap: var(--sp-2xl); }
   /* 单列后子项仍按 min-content 撑开（明细表 520px），必须允许收缩 */
   .grid-2 > * { min-width: 0; }
   /* 排行行固定列宽合计 476px，窄屏放不下会导致整页横向溢出 */

@@ -14,3 +14,8 @@ desktop/src-tauri/gen/
 # 打包给 Tauri 的 sidecar（server.mjs + Node 运行时，约 114MB），
 # 由 npm run build:sidecar 生成，绝不入库
 desktop/src-tauri/resources/sidecar/
+
+# 设计参考库（VoltAgent/awesome-design-md，84 份 DESIGN.md，约 3.7MB）。
+# UI 设计时读取这里的 DESIGN.md 当基准，选型结论见 docs/UI_DESIGN_REFERENCE.md。
+# 外部仓库，随取随更新，不入库。
+.refs/

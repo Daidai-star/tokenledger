@@ -207,6 +207,80 @@ agent 每轮把整个对话上下文重发一遍（实测单轮 `cached_input_to
 
 ## 重要口径与决策
 
+**UI 基准：posthog 的布局纪律 + claude 的配色（2026-10-14 定）。**
+
+参考库在 `~/.refs/awesome-design-md`（84 份 DESIGN.md，MIT，VoltAgent/awesome-design-md），
+已通过 `~/.config/opencode/opencode.json` 的 `references.design-md` 注册为全局可用，
+`~/.config/opencode/AGENTS.md` 写入使用规则——**换到任何项目都自动生效**。
+
+**为什么是 posthog 的方法而不是它的皮肤**：它的画布 `#eeefe9` 跟我们差 33，
+但我们的 `#faf9f5` 与 claude 的画布**逐位相同**（感知距离 0），换色纯折腾。
+所以只借布局与密度纪律，保留现有配色。
+
+选它的理由是**问题域相同**（产品分析看板：时间序列、拆解、密集数字、行动建议），
+且它有个洞察正好对上我们的 7 栏结构：
+
+> Whitespace is generous on marketing pages and **tight on doc pages**.
+
+### 间距系统化（125 处违规 → 0）
+
+改造前 193 处间距声明里 **125 处落不到任何刻度**上，而且**没有任何间距变量**——
+每个值都就地写死，散着 `1/3/5/7/9/10/13/14/18/22/26/34/44px`。
+这不是审美问题，是没有节奏可循——「说不上哪里不对」的真正来源。
+
+现在只有 10 个合法值（基数 8px + 2/4/6px 紧致档），全部走 `--sp-*` 变量：
+
+| token | 值 | 用途 |
+| --- | --- | --- |
+| `--sp-3xs/2xs/xs` | 2/4/6px | 图标贴合、紧凑控件 |
+| `--sp-sm/md/lg` | 8/12/16px | 图例项、卡片内边距 |
+| `--sp-xl/2xl/3xl` | 24/32/48px | 区块内组间隙 |
+| `--sp-section` | 80px | 区块之间（原 56px） |
+
+**踩过的坑**：批量替换和校验脚本用了同一个正则，都只匹配冒号后的**第一个**数值，
+于是 shorthand（`padding: 5px 10px`）全部漏改，而校验还**误报通过**。
+第二版改成捕获整条声明的值列表才查出来 26 处漏网。
+校验脚本和替换脚本犯同样的错时，校验结果不可信。
+
+### 强调色收敛（43 → 32 处）
+
+`--accent` 之前同时承担**品牌色**和**状态色**两种职责。严重度用品牌珊瑚色表达是错的——
+「严重」和「品牌」是两种语义，混用会让强调色失去意义。
+
+新增 `--sev-severe/moderate/mild` 三档承载状态，迁走的都是语义错配：
+
+| 位置 | 从 | 到 | 理由 |
+| --- | --- | --- | --- |
+| `.waste-severe` | accent | `--sev-severe` | 严重度是状态 |
+| `.guard-bar-max/proj` | accent | `--sev-severe` | 阈值标记 |
+| `.heat-cell.lv4` | accent | `--sev-severe` | 强度不是品牌 |
+| 护栏指针 | accent | `--sev-severe` | 指向超线柱 |
+| `.btn.danger` | accent | `--sev-severe` | 危险操作 |
+| `.scan-error` | accent | `--sev-severe` | 错误态 |
+| `.insight-warn` | accent | `--sev-moderate` | 警告态 |
+| `.pace-projected` | accent | `--ink-3` | 预测值不该用最响亮的颜色 |
+
+剩下 32 处经分类**没有一处是装饰性用色**：品牌/焦点 5、导航交互 10、运行中状态 4、
+数据主指标 13（主指标数字、进度条、当前档位——功能性）。
+原先定的「≤6 处」目标不现实，强行压到 6 只会把「数据主色」另起一个变量，等于改名。
+
+`--sev-mild` 刻意用低饱和（`#6f7d52`），不与 severe 抢注意力。
+
+### 刻意保留的偏离
+
+1. **8 个数据色全留**（clay/sage/slate/ochre/plum/moss/sand/slate2）。
+   posthog 的「单一强调色」针对装饰性用色；我们这些是功能性的——
+   图表里区分 Codex/DSH/OpenCode/Claude，砍掉图就读不懂。
+2. **不引入吉祥物系统**。刺猬是 posthog 的品牌资产，不可迁移。
+
+### 顺带修掉的布局 bug
+
+`.tb-row` 是 `grid-template-columns: 7px 1fr auto 52px` 的四列网格，
+加「输入合计（含缓存读）」那行时**漏了首列的色块占位**，
+标签掉进 7px 的色块槽里——内容 119px 只剩 7px 可见。
+窄屏另有一处：`（含缓存读）` 6 个字在 390px 下超出 3px，
+改为窄屏隐藏后缀（口径已在区块副标题写明）。
+
 **对齐 CC Switch：`input` 展示为含缓存读（2026-10-14）。**
 
 参考 `~/.cc-switch/cc-switch.db`，它的 `proxy_request_logs.input_tokens`

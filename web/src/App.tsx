@@ -590,13 +590,7 @@ function TabBar({ tab, setTab }: { tab: string; setTab: (t: string) => void }) {
           <button
             key={t.name}
             className={`tabbar-btn ${tab === t.name ? "on" : ""}`}
-            onClick={() => {
-              setTab(t.name);
-              // 切栏后滚回顶部：否则会停在上一个栏滚到一半的位置，
-              // 看起来像「页面没反应」。平滑滚动尊重用户的动效偏好。
-              const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-              window.scrollTo({ top: 0, behavior: reduce ? "auto" : "smooth" });
-            }}
+            onClick={() => setTab(t.name)}
             aria-current={tab === t.name ? "page" : undefined}
           >
             <span className="tabbar-name">{t.name}</span>
@@ -621,6 +615,35 @@ export default function App() {
   const [metric, setMetric] = useState<"total_tokens" | "requests" | "cost_usd">("total_tokens");
   // 分栏：当前看哪一栏。诊断默认放最前——它给的是行动建议，用户最该先看。
   const [tab, setTab] = useState("诊断");
+  const firstRender = useRef(true);
+
+  /**
+   * 切栏后定位到该栏的**第一个区块**，而不是页面顶部。
+   *
+   * 原来在 onClick 里直接 `scrollTo({ top: 0 })`，理由写的是「否则会停在上一个栏
+   * 滚到一半的位置，看起来像页面没反应」。但 profile + stat-row 是**所有栏共享**的
+   * （渲染在 `<Tab>` 之外），高度约 900px——滚到 0 之后看到的仍是这段共享头部，
+   * 真正的栏内容还在首屏之外，用户必须再往下翻一次。
+   *
+   * 放在 useEffect 里而不是 onClick，是因为要等新栏内容挂载完才量得到位置。
+   * 用 rAF 再等一帧，确保 DOM 已更新。
+   */
+  useEffect(() => {
+    if (firstRender.current) {
+      firstRender.current = false;
+      return; // 首次加载不要动滚动位置
+    }
+    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const raf = requestAnimationFrame(() => {
+      // 让第一个区块刚好落在粘性标签栏下方，不被遮住
+      const bar = document.querySelector(".tabbar");
+      const offset = (bar?.getBoundingClientRect().height ?? 0) + 16;
+      const first = document.querySelector("[data-reveal]");
+      const top = first ? first.getBoundingClientRect().top + window.scrollY - offset : 0;
+      window.scrollTo({ top: Math.max(0, top), behavior: reduce ? "auto" : "smooth" });
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [tab]);
   const [focusModel, setFocusModel] = useState<string | null>(null);
 
   useEffect(() => {

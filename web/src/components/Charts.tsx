@@ -682,6 +682,9 @@ export function TokenBreakdown({
           </div>
         ))}
         <div className="tb-row tb-row-total">
+          {/* 占位色块列：.tb-row 是 7px 1fr auto 52px 的四列网格，
+              少一个子元素会让后面的列整体左移一格——标签会掉进 7px 的色块槽里。 */}
+          <span className="dot" style={{ background: "transparent" }} />
           <span className="legend-label">
             输入合计<em>（含缓存读）</em>
           </span>
