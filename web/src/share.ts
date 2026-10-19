@@ -10,20 +10,26 @@
  * 卡片同样不上传：生成后交给系统的「分享」面板 / 保存到本地，由用户自己决定发不发。
  */
 
-/** 与 styles.css 一致的设计 token */
+import { iconDataUrl } from "./mall-icons";
+
+/** 与 styles.css 一致的设计 token（制图板） */
 const C = {
-  paper: "#faf9f5",
-  surface: "#fffefb",
-  sunk: "#f4f2ec",
-  line: "#e8e5dc",
-  lineStrong: "#d8d4c8",
-  ink: "#1a1917",
-  ink2: "#5d5b55",
-  ink3: "#918e85",
-  ink4: "#b5b2a8",
-  accent: "#c15f3c",
-  accentSoft: "#f5e9e2",
+  paper: "#f5f5ed",
+  surface: "#f5f5ed",
+  sunk: "#ecece2",
+  line: "#b3b3af",
+  lineStrong: "#282828",
+  ink: "#282828",
+  ink2: "#414140",
+  ink3: "#72726f",
+  ink4: "#b4b4b0",
+  accent: "#fa3600",
+  accentSoft: "#ffe7de",
+  accentLine: "#ffb59e",
 };
+
+/** 卡片统一用自托管的 grotesque 画数字/拉丁，中文回退到系统栈（同 DESIGN.md 的 CJK 规则） */
+const SANS = "'Inter Var', 'PingFang SC', 'Microsoft YaHei', sans-serif";
 
 export interface CardInput {
   costUsd: number | null;
@@ -33,6 +39,8 @@ export interface CardInput {
   activeDays: number;
   /** 阶梯上最能代表购买力的一件 */
   bestLabel: string;
+  /** 该商品的图标 id（mall-icons.ts 里的 key）；空则只画文字 */
+  bestIcon?: string;
   /** 换算后的预算（元） */
   budgetCNY: number;
   /** 预算的中文读法 */
@@ -44,6 +52,23 @@ export interface CardInput {
 
 const W = 1200;
 const H = 630; // 1.91:1，适合 OG 图 / 社交平台
+
+/**
+ * 把商品图标（SVG 线稿）加载成可直接 drawImage 的图像。
+ *
+ * 走 data URL 而不是 URL：整个过程不产生网络请求。
+ * 加载失败不算错误——分享卡片少一个图标也要能出图。
+ */
+function loadIcon(id: string, color: string): Promise<HTMLImageElement | null> {
+  const src = iconDataUrl(id, color, 96);
+  if (!src) return Promise.resolve(null);
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => resolve(null);
+    img.src = src;
+  });
+}
 
 function roundRect(
   c: CanvasRenderingContext2D,
@@ -104,6 +129,11 @@ export async function renderShareCard(input: CardInput): Promise<Blob> {
   canvas.height = H * scale;
   const c = canvas.getContext("2d");
   if (!c) throw new Error("无法获取 canvas 2d 上下文");
+
+  // 商品图标：把与界面同一份线稿序列化成 data URL 再画进来。
+  // data URL 不产生网络请求，符合「不联网、不上传」的定位。
+  const icon = input.bestIcon ? await loadIcon(input.bestIcon, C.ink) : null;
+
   c.scale(scale, scale);
   c.textBaseline = "alphabetic";
 
@@ -135,21 +165,21 @@ export async function renderShareCard(input: CardInput): Promise<Blob> {
 
   // ---- 品牌行
   c.fillStyle = C.accent;
-  c.font = "600 30px ui-serif, Georgia, serif";
+  c.font = `700 30px ${SANS}`;
   c.fillText("TL", PAD, PAD + 6);
 
   c.fillStyle = C.ink;
-  c.font = "500 25px ui-serif, Georgia, serif";
+  c.font = `700 25px ${SANS}`;
   c.fillText("TokenLedger", PAD + 46, PAD + 6);
 
   c.fillStyle = C.ink3;
-  c.font = "13px -apple-system, 'PingFang SC', sans-serif";
+  c.font = `13px ${SANS}`;
   c.fillText("本机 Coding AI 用量账本", PAD, PAD + 32);
 
   // 右上：范围
   c.textAlign = "right";
   c.fillStyle = C.ink3;
-  c.font = "13px -apple-system, 'PingFang SC', sans-serif";
+  c.font = `13px ${SANS}`;
   c.fillText(input.span, W - PAD, PAD + 6);
   c.textAlign = "left";
 
@@ -164,17 +194,17 @@ export async function renderShareCard(input: CardInput): Promise<Blob> {
   // ---- 主数字
   let y = PAD + 118;
   c.fillStyle = C.ink3;
-  c.font = "13px -apple-system, 'PingFang SC', sans-serif";
+  c.font = `13px ${SANS}`;
   c.fillText("累计账单折合", PAD, y);
 
   y += 66;
   c.fillStyle = C.ink;
-  c.font = "400 76px ui-serif, Georgia, serif";
+  c.font = `700 76px ${SANS}`;
   c.fillText(fmtCNYShort(input.budgetCNY), PAD, y);
 
   y += 30;
   c.fillStyle = C.ink2;
-  c.font = "400 19px ui-serif, Georgia, serif";
+  c.font = `600 19px ${SANS}`;
   c.fillText(input.budgetVerbose, PAD, y);
 
   // ---- 购买力高亮块
@@ -183,16 +213,26 @@ export async function renderShareCard(input: CardInput): Promise<Blob> {
   roundRect(c, PAD, boxY, W - PAD * 2, boxH, 10);
   c.fillStyle = C.accentSoft;
   c.fill();
-  c.strokeStyle = "#e4c7b8";
+  c.strokeStyle = C.accentLine;
   c.lineWidth = 1;
   c.stroke();
 
   c.fillStyle = C.accent;
-  c.font = "13px -apple-system, 'PingFang SC', sans-serif";
+  c.font = `13px ${SANS}`;
   c.fillText("这笔钱能拿下", PAD + 22, boxY + 30);
   c.fillStyle = C.ink;
-  c.font = "500 26px -apple-system, 'PingFang SC', sans-serif";
-  c.fillText(fitText(c, input.bestLabel, W - PAD * 2 - 44), PAD + 22, boxY + 60);
+  c.font = `600 26px ${SANS}`;
+  // 图标占右侧 40px，文字要相应收窄，否则长商品名会压到图标上
+  const iconBox = icon ? 52 : 0;
+  c.fillText(
+    fitText(c, input.bestLabel, W - PAD * 2 - 44 - iconBox),
+    PAD + 22,
+    boxY + 60,
+  );
+
+  if (icon) {
+    c.drawImage(icon, W - PAD - 20 - 40, boxY + 18, 40, 40);
+  }
 
   // ---- 四个指标
   const stats: [string, string][] = [
@@ -206,10 +246,10 @@ export async function renderShareCard(input: CardInput): Promise<Blob> {
   stats.forEach(([k, v], i) => {
     const x = PAD + i * colW;
     c.fillStyle = C.ink3;
-    c.font = "12px -apple-system, 'PingFang SC', sans-serif";
+    c.font = `12px ${SANS}`;
     c.fillText(k, x, sy);
     c.fillStyle = C.ink;
-    c.font = "400 27px ui-serif, Georgia, serif";
+    c.font = `700 27px ${SANS}`;
     c.fillText(v, x, sy + 34);
     if (i > 0) {
       c.strokeStyle = C.line;
@@ -237,7 +277,7 @@ export async function renderShareCard(input: CardInput): Promise<Blob> {
   // 图例
   let lx = PAD;
   const ly = barY + 30;
-  c.font = "12px -apple-system, 'PingFang SC', sans-serif";
+  c.font = `12px ${SANS}`;
   for (let i = 0; i < input.tools.length; i++) {
     const label = `${input.tools[i].name} ${(parts[i] * 100).toFixed(0)}%`;
     const tw = c.measureText(label).width;
@@ -253,7 +293,7 @@ export async function renderShareCard(input: CardInput): Promise<Blob> {
 
   // ---- 底部免责说明：这是个估算，不该被当成报价
   c.fillStyle = C.ink4;
-  c.font = "11px -apple-system, 'PingFang SC', sans-serif";
+  c.font = `11px ${SANS}`;
   c.fillText(
     "价格与汇率为参考值，非实时报价 · 数据全部来自本机，不上传",
     PAD,

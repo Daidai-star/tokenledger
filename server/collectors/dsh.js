@@ -27,7 +27,7 @@ export const dsh = new Collector({
   id: SOURCE,
   name: "DSH",
   website: null,
-  color: "#c09553",
+  color: "#c0842f",
   roots: [path.join(os.homedir(), ".dsh", "sessions")],
   detect: () => fs.existsSync(path.join(os.homedir(), ".dsh")),
   async scan(ctx) {

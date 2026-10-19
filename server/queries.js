@@ -1009,35 +1009,285 @@ export class Queries {
     const limit = Number(q.limit) || 20;
     const clauses = [];
     const params = [];
+    // 之前这里**完全忽略 from/to**：选中「最近 7 天」时，这张表仍在列全历史会话。
+    // 既是性能问题（见下），也是口径 bug。
+    if (q.from) {
+      clauses.push("date(s.started_at/1000, 'unixepoch') >= ?");
+      params.push(q.from);
+    }
+    if (q.to) {
+      clauses.push("date(s.started_at/1000, 'unixepoch') <= ?");
+      params.push(q.to);
+    }
     if (q.tools?.length) {
-      clauses.push(`tool IN (${q.tools.map(() => "?").join(",")})`);
+      clauses.push(`s.tool IN (${q.tools.map(() => "?").join(",")})`);
       params.push(...q.tools);
     }
     const w = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
-    const sessions = this.store
+
+    // 原来是对每个会话各发一条 `SUM(...) WHERE session_id=? AND tool=?`。
+    // 20 个会话 = 20 次全表扫描（session_id 当时无索引），实测 207ms。
+    // 改成「一次 GROUP BY + LEFT JOIN」：单趟扫描，走 idx_events_session。
+    const rows = this.store
       .prep(
-        `SELECT session_id, tool, started_at, ended_at, cwd, title, model, messages
-         FROM sessions ${w} ORDER BY started_at DESC LIMIT ?`,
+        `SELECT s.session_id, s.tool, s.started_at, s.ended_at, s.cwd, s.title, s.model, s.messages,
+                COALESCE(u.total_tokens, 0)   AS total_tokens,
+                COALESCE(u.input_tokens, 0)   AS input_tokens,
+                COALESCE(u.output_tokens, 0)  AS output_tokens,
+                COALESCE(u.cost_usd, 0)       AS cost_usd,
+                COALESCE(u.requests, 0)       AS requests
+           FROM sessions s
+           LEFT JOIN (
+             SELECT session_id, tool,
+                    SUM(total_tokens)  AS total_tokens,
+                    SUM(input_tokens)  AS input_tokens,
+                    SUM(output_tokens) AS output_tokens,
+                    SUM(cost_usd)      AS cost_usd,
+                    COUNT(*)           AS requests
+               FROM usage_events
+              GROUP BY session_id, tool
+           ) u ON u.session_id = s.session_id AND u.tool = s.tool
+           ${w}
+          ORDER BY s.started_at DESC
+          LIMIT ?`,
       )
       .all(...params, limit);
 
-    if (!sessions.length) return [];
-    // 批量补每个会话的用量
-    const out = [];
-    for (const s of sessions) {
-      const u = this.store
-        .prep(
-          `SELECT COALESCE(SUM(total_tokens),0) AS total_tokens,
-                  COALESCE(SUM(input_tokens),0) AS input_tokens,
-                  COALESCE(SUM(output_tokens),0) AS output_tokens,
-                  COALESCE(SUM(cost_usd),0) AS cost_usd,
-                  COUNT(*) AS requests
-           FROM usage_events WHERE session_id = ? AND tool = ?`,
-        )
-        .get(s.session_id, s.tool);
-      out.push({ ...s, ...u, cost_usd: round(u.cost_usd) });
+    return rows.map((r) => ({ ...r, cost_usd: round(r.cost_usd) }));
+  }
+
+  /**
+   * 模型速度。
+   *
+   * 口径：**生成区间**。
+   *   同会话内按 ts 排序，相邻两条事件的间隔 ≈ 那次请求的生成时长，
+   *   于是 tok/s = Σ输出token ÷ Σ生成秒数。
+   *
+   * 为什么不用「除以活跃分钟」：
+   *   一个「活跃分钟」会被记满 60 秒，哪怕这一分钟里实际只生成了 8 秒——
+   *   分母被撑大约 7 倍，速度被系统性低估。按真实区间算才是每秒速度。
+   *
+   * 区间过滤（依据实测分布：92,353 个区间）：
+   *   < 1s    剔除：同一批事件的抖动，不是一次生成
+   *   ≥ 300s  剔除：用户走开 / 换了任务，不是生成时长（占 0.9%，
+   *           但不剔除会把整体速度从 ~26 tok/s 拉低到 0.8 tok/s）
+   *   保留区间覆盖 92.6% 的样本。
+   *
+   * 注意：区间里含工具调用与排队时间，所以结果偏**保守**（模型真实生成更快）。
+   *
+   * 输出：
+   *   latestByTool —— 每个工具**最近一次会话**用的模型与速度（不随范围过滤，问的就是「最新」）
+   *   byModel / byTool / byDay / byHour / overall —— 当前范围内各维度的速度，同一口径
+   */
+  speed(q = {}) {
+    const GAP_MIN = 1000;
+    const GAP_MAX = 300000;
+    const valid = `gap >= ${GAP_MIN} AND gap < ${GAP_MAX} AND output_tokens > 0`;
+    /** 输出 token / 生成秒数 */
+    const spd = (genOut, genMs) => (genMs > 0 ? genOut / (genMs / 1000) : 0);
+
+    // ---- 每个工具最近一次会话 ----
+    //
+    // 从**事件表**取，而不是从 `sessions` 表：opencode 采集器压根没写 `sessions`
+    // （2,443 个事件、11 个会话 id 在事件表里，`sessions` 里一条都没有），
+    // 用 `sessions` 当主表会让整个工具从面板里消失。
+    //
+    // 这里依赖 SQLite 的一个明确保证：只含一个 MAX() 聚合时，裸列取自取到最大值那一行。
+    // 所以 `session_id` / `cwd` / `model` 就是「该工具最后一条事件」所属的会话与模型。
+    const latest = this.store
+      .prep(
+        `SELECT tool, session_id, cwd, model, MAX(ts) AS last_ts
+           FROM usage_events
+          GROUP BY tool`,
+      )
+      .all();
+
+    // `sessions` 只用来补标题和开始时间（它是可选的）
+    const sessionMeta = new Map(
+      this.store
+        .prep(`SELECT tool, session_id, title, started_at FROM sessions`)
+        .all()
+        .map((s) => [`${s.session_id}::${s.tool}`, s]),
+    );
+
+    let latestByTool = [];
+    if (latest.length) {
+      const tuples = latest.map(() => "(?, ?)").join(", ");
+      const params = [];
+      for (const s of latest) params.push(s.session_id, s.tool);
+      const stats = new Map(
+        this.store
+          .prep(
+            `WITH o AS (
+               SELECT session_id, tool, ts, total_tokens, cache_read_tokens, output_tokens, cost_usd,
+                      ts - LAG(ts) OVER (PARTITION BY session_id, tool ORDER BY ts) AS gap
+                 FROM usage_events
+                WHERE (session_id, tool) IN (VALUES ${tuples})
+             )
+             SELECT session_id, tool,
+                    COUNT(*)                             AS requests,
+                    COALESCE(SUM(total_tokens), 0)       AS tokens,
+                    COALESCE(SUM(cache_read_tokens), 0)  AS cache_read,
+                    COALESCE(SUM(output_tokens), 0)      AS out_tokens,
+                    COALESCE(SUM(cost_usd), 0)           AS cost_usd,
+                    MAX(ts)                              AS last_ts,
+                    COUNT(*) FILTER (WHERE ${valid})                        AS intervals,
+                    COALESCE(SUM(gap) FILTER (WHERE ${valid}), 0)           AS gen_ms,
+                    COALESCE(SUM(output_tokens) FILTER (WHERE ${valid}), 0) AS gen_out
+               FROM o
+              GROUP BY session_id, tool`,
+          )
+          .all(...params)
+          .map((r) => [`${r.session_id}::${r.tool}`, r]),
+      );
+
+      latestByTool = latest
+        .map((s) => {
+          const st = stats.get(`${s.session_id}::${s.tool}`);
+          if (!st) return null;
+          const meta = sessionMeta.get(`${s.session_id}::${s.tool}`) || {};
+          return {
+            tool: s.tool,
+            session_id: s.session_id,
+            cwd: s.cwd,
+            title: meta.title ?? null,
+            model: s.model,
+            started_at: meta.started_at ?? s.last_ts,
+            last_ts: st.last_ts || s.last_ts,
+            requests: st.requests || 0,
+            tokens: st.tokens || 0,
+            cache_read: st.cache_read || 0,
+            out_tokens: st.out_tokens || 0,
+            intervals: st.intervals || 0,
+            gen_seconds: Math.round((st.gen_ms || 0) / 1000),
+            tok_per_sec: spd(st.gen_out || 0, st.gen_ms || 0),
+            out_per_req: st.requests ? (st.out_tokens || 0) / st.requests : 0,
+            cost_usd: round(st.cost_usd || 0),
+          };
+        })
+        .filter((r) => r && r.requests > 0)
+        .sort((a, b) => b.last_ts - a.last_ts);
     }
-    return out;
+
+    // ---- 排行 / 分布：一次窗口扫描，按 (日, 时, 工具, 模型) 分组，其余维度在 JS 里汇总 ----
+    //
+    // 为什么只扫一趟：这四个维度的组合其实很稀疏（全历史实测只有 1,122 行），
+    // 而这一趟 228ms。分四次 GROUP BY 就是 ~900ms——所以分组一次，其余 rollup。
+    //
+    // 模型名按**裸名**分组（去掉 provider 前缀）：否则 `opencode-go/deepseek-v4.1-flash`
+    // 和 `deepseek-v4.1-flash` 会各占一行，前端用 bareModel() 显示成同名，看着像重复两行。
+    //
+    // 窗口函数必须在**范围过滤之前**算：否则范围内第一条事件没有前一条，
+    // 间隔是 NULL，会白丢一个样本。所以 CTE 全表算窗口，外层再按 day 过滤。
+    const w = this.#where(q);
+    const bare = "CASE WHEN instr(model, '/') > 0 THEN substr(model, instr(model, '/') + 1) ELSE model END";
+    const rows = this.store
+      .prep(
+        `WITH o AS (
+           SELECT session_id, tool, ts, day, hour, model, total_tokens, cache_read_tokens, output_tokens,
+                  ts - LAG(ts) OVER (PARTITION BY session_id, tool ORDER BY ts) AS gap
+             FROM usage_events
+         )
+         SELECT day, hour, tool, ${bare} AS model,
+                COUNT(*)                            AS requests,
+                COALESCE(SUM(total_tokens), 0)      AS tokens,
+                COALESCE(SUM(cache_read_tokens), 0) AS cache_read,
+                COALESCE(SUM(output_tokens), 0)     AS out_tokens,
+                COUNT(*) FILTER (WHERE ${valid})                        AS intervals,
+                COALESCE(SUM(gap) FILTER (WHERE ${valid}), 0)           AS gen_ms,
+                COALESCE(SUM(output_tokens) FILTER (WHERE ${valid}), 0) AS gen_out
+           FROM o ${w.sql}
+          GROUP BY day, hour, tool, model`,
+      )
+      .all(...w.params);
+
+    /**
+     * 把上面那张细表按任意维度汇总。
+     * 与旧口径的关键差别就在 `gen_ms`：这里累加的是**真实生成毫秒**，
+     * 而旧口径用「记满 60 秒的活跃分钟数」或「完成所在的秒数」当分母——
+     * 前者把 8 秒的生成算成 60 秒（低估 7 倍），后者把整次响应当成 1 秒（高估约 10 倍）。
+     */
+    const rollup = (keyOf) => {
+      const acc = new Map();
+      for (const r of rows) {
+        const k = keyOf(r);
+        let v = acc.get(k);
+        if (!v) {
+          v = { requests: 0, tokens: 0, cache_read: 0, out_tokens: 0, intervals: 0, gen_ms: 0, gen_out: 0 };
+          acc.set(k, v);
+        }
+        v.requests += r.requests;
+        v.tokens += r.tokens;
+        v.cache_read += r.cache_read;
+        v.out_tokens += r.out_tokens;
+        v.intervals += r.intervals;
+        v.gen_ms += r.gen_ms;
+        v.gen_out += r.gen_out;
+      }
+      return [...acc.entries()].map(([key, v]) => ({
+        key,
+        requests: v.requests,
+        tokens: v.tokens,
+        cache_read: v.cache_read,
+        out_tokens: v.out_tokens,
+        intervals: v.intervals,
+        gen_seconds: Math.round(v.gen_ms / 1000),
+        tok_per_sec: spd(v.gen_out, v.gen_ms),
+        out_per_req: v.requests ? v.out_tokens / v.requests : 0,
+      }));
+    };
+
+    const modelRows = rollup((r) => r.model).sort((a, b) => b.out_tokens - a.out_tokens);
+    const byModel = modelRows.slice(0, 12).map(({ key, ...rest }) => ({ model: key, ...rest }));
+    const byTool = rollup((r) => r.tool).sort((a, b) => b.out_tokens - a.out_tokens);
+    const byDay = rollup((r) => r.day).sort((a, b) => (a.key < b.key ? -1 : 1));
+
+    const byHourMap = new Map(rollup((r) => r.hour).map((r) => [r.key, r]));
+    const byHour = Array.from({ length: 24 }, (_, h) =>
+      byHourMap.get(h) || {
+        key: h,
+        requests: 0,
+        tokens: 0,
+        cache_read: 0,
+        out_tokens: 0,
+        intervals: 0,
+        gen_seconds: 0,
+        tok_per_sec: 0,
+        out_per_req: 0,
+      },
+    );
+
+    const tot = rows.reduce(
+      (a, r) => ({
+        requests: a.requests + r.requests,
+        tokens: a.tokens + r.tokens,
+        cache_read: a.cache_read + r.cache_read,
+        out_tokens: a.out_tokens + r.out_tokens,
+        intervals: a.intervals + r.intervals,
+        gen_ms: a.gen_ms + r.gen_ms,
+        gen_out: a.gen_out + r.gen_out,
+      }),
+      { requests: 0, tokens: 0, cache_read: 0, out_tokens: 0, intervals: 0, gen_ms: 0, gen_out: 0 },
+    );
+
+    return {
+      latestByTool,
+      byModel,
+      byTool,
+      byDay,
+      byHour,
+      overall: {
+        models: modelRows.length,
+        requests: tot.requests,
+        tokens: tot.tokens,
+        cache_read: tot.cache_read,
+        out_tokens: tot.out_tokens,
+        intervals: tot.intervals,
+        gen_seconds: Math.round(tot.gen_ms / 1000),
+        tok_per_sec: spd(tot.gen_out, tot.gen_ms),
+        out_per_req: tot.requests ? tot.out_tokens / tot.requests : 0,
+      },
+    };
   }
 
   /** 最近事件流 */

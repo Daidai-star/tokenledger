@@ -40,6 +40,53 @@ test("事件写入幂等：重复 id 不重复计数", () => {
   store.close();
 });
 
+test("重扫时就地回填 cwd，但绝不改写 token 计数", () => {
+  const { store } = freshStore();
+  // 第一次扫描：采集器还不会读 cwd
+  store.insertEvents([mk({ id: "e1", cwd: null, inputTokens: 100, outputTokens: 20 })]);
+  // 修好采集器后重扫：cwd 有了，但 token 数被上游改写成了别的值
+  const added = store.insertEvents([
+    mk({ id: "e1", cwd: "/w/foo", inputTokens: 999, outputTokens: 999 }),
+  ]);
+
+  assert.equal(added, 0, "同一个 id 不算新增");
+  const row = store
+    .prep("SELECT cwd, input_tokens, output_tokens FROM usage_events WHERE event_id = 'e1'")
+    .get();
+  assert.equal(row.cwd, "/w/foo", "空的 cwd 应该被就地补上");
+  assert.equal(row.input_tokens, 100, "token 计数是既成事实，不该被重扫改写");
+  assert.equal(row.output_tokens, 20);
+  store.close();
+});
+
+test("重扫不会用空值抹掉已知字段，也不会让 model 退回 unknown", () => {
+  const { store } = freshStore();
+  store.insertEvents([
+    mk({ id: "e1", cwd: "/w/foo", model: "gpt-5", latencyMs: 0, ttftMs: 0 }),
+  ]);
+  // 源侧把这行裁剪/降级了：cwd 没了，model 变成 unknown，但补上了耗时
+  store.insertEvents([
+    mk({ id: "e1", cwd: null, model: "unknown", latencyMs: 4200, ttftMs: 900 }),
+  ]);
+
+  const row = store
+    .prep("SELECT cwd, model, latency_ms, ttft_ms FROM usage_events WHERE event_id = 'e1'")
+    .get();
+  assert.equal(row.cwd, "/w/foo", "新值为空时保留旧值");
+  assert.equal(row.model, "gpt-5", "unknown 视为空，不覆盖已知模型");
+  assert.equal(row.latency_ms, 4200, "耗时拿 0 当哨兵，应被补上");
+  assert.equal(row.ttft_ms, 900);
+  store.close();
+});
+
+test("批量里重复 id 只算一次新增", () => {
+  const { store } = freshStore();
+  const n = store.insertEvents([mk({ id: "e1" }), mk({ id: "e1" }), mk({ id: "e2" })]);
+  assert.equal(n, 2);
+  assert.equal(store.dataRange().events, 2);
+  store.close();
+});
+
 test("total_tokens 含缓存读与写", () => {
   const { store } = freshStore();
   store.insertEvents([

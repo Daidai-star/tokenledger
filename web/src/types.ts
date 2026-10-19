@@ -391,6 +391,50 @@ export interface ScanProgress {
   pricingSource?: string;
 }
 
+/** 一个维度上的「生成区间」速度汇总（模型 / 工具 / 天 / 小时共用同一形状） */
+export interface SpeedBucket {
+  requests: number;
+  tokens: number;
+  cache_read: number;
+  out_tokens: number;
+  /** 有效生成区间的个数（1s ≤ 相邻请求间隔 < 300s） */
+  intervals: number;
+  /** 生成总时长（秒）= 有效区间之和 */
+  gen_seconds: number;
+  /** 输出 token ÷ 生成秒数 */
+  tok_per_sec: number;
+  out_per_req: number;
+}
+
+export interface SpeedToolSession extends SpeedBucket {
+  tool: string;
+  session_id: string;
+  cwd: string | null;
+  title: string | null;
+  model: string | null;
+  started_at: number;
+  last_ts: number;
+  cost_usd: number;
+}
+
+export interface SpeedModelRow extends SpeedBucket {
+  model: string;
+}
+
+/** byTool / byDay / byHour 用 key 标识维度值（工具 id / 日期 / 小时 0-23） */
+export interface SpeedKeyedBucket extends SpeedBucket {
+  key: string | number;
+}
+
+export interface SpeedData {
+  latestByTool: SpeedToolSession[];
+  byModel: SpeedModelRow[];
+  byTool: SpeedKeyedBucket[];
+  byDay: SpeedKeyedBucket[];
+  byHour: SpeedKeyedBucket[];
+  overall: SpeedBucket & { models: number };
+}
+
 export interface Dashboard {
   range: { from: string | null; to: string | null; tools: string[] | null };
   dataRange: { from: string | null; to: string | null; events: number };
@@ -411,6 +455,7 @@ export interface Dashboard {
   waste: WasteData;
   guard: GuardData;
   pace: PaceData;
+  speed: SpeedData;
   sessions: SessionRow[];
   recentEvents: EventRow[];
   lastScan: ScanRun | null;

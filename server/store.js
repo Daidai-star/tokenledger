@@ -44,6 +44,9 @@ CREATE INDEX IF NOT EXISTS idx_events_tool    ON usage_events(tool);
 CREATE INDEX IF NOT EXISTS idx_events_model   ON usage_events(model);
 CREATE INDEX IF NOT EXISTS idx_events_ts      ON usage_events(ts);
 CREATE INDEX IF NOT EXISTS idx_events_tool_day ON usage_events(tool, day);
+-- session_id 上没有索引时，sessions() 里「每个会话再查一次用量」是 20 次全表扫描
+-- （9.3 万行 × 20 ≈ 200ms）。这是切时间范围卡顿的主要来源之一。
+CREATE INDEX IF NOT EXISTS idx_events_session ON usage_events(session_id, tool);
 
 CREATE TABLE IF NOT EXISTS sessions (
   session_id TEXT NOT NULL,
@@ -165,22 +168,66 @@ export class Store {
 
   // ---------- 事件写入 ----------
 
-  /** 幂等批量插入，返回新增条数 */
+  /**
+   * 批量写入事件，返回**新增**条数（重复 id 不计）。
+   *
+   * 冲突时不再 `OR IGNORE`，而是**只补空、不覆盖**。
+   *
+   * 为什么改：本地库是历史归档，而源日志随时可能被工具自己裁剪
+   * （opencode 实测裁剪过：重扫时源库只剩 983 条，旧事件已在源侧消失）。
+   * `OR IGNORE` 会让「采集器后来才学会读某个字段」只能靠**删库重扫**解决，
+   * 而删库重扫在源已裁剪时会**真的丢数据**——2026-10-16 实测丢了
+   * 1,464 条事件 / 330M token。改成补空之后，修好采集器重扫即可就地回填。
+   *
+   * 覆盖规则与 `upsertSession` 一致：**新值非空则以新值为准，新值为空则保留旧值**。
+   * 注意 `model` 的「空」是 `'unknown'` 而不是 NULL（见 UsageEvent 构造函数）。
+   *
+   * 刻意**不动**账本的事实列：`ts` / `day` / `hour` / `tool` /
+   * 各类 token 计数 / `success`。这些是既成数字，重扫不该悄悄改写总量；
+   * 真要重算，走「清库重扫」。
+   */
   insertEvents(events) {
     if (!events.length) return 0;
+
+    // 先查这批 id 里哪些已存在，用来算「新增」。
+    // （upsert 之后 changes() 对「插入」和「更新」都返回 1，分不出来。）
+    const ids = events.map((e) => e.id);
+    const known = new Set();
+    for (let i = 0; i < ids.length; i += 400) {
+      const chunk = ids.slice(i, i + 400);
+      const q = `SELECT event_id FROM usage_events WHERE event_id IN (${chunk.map(() => "?").join(",")})`;
+      for (const r of this.prep(q).all(...chunk)) known.add(r.event_id);
+    }
+
     const stmt = this.prep(
-      `INSERT OR IGNORE INTO usage_events (
+      `INSERT INTO usage_events (
         event_id, tool, ts, day, hour, session_id, cwd, model, provider, protocol,
         input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, reasoning_tokens,
         total_tokens, status, success, latency_ms, ttft_ms, cost_usd, cost_source,
         surface, originator
-      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+      ON CONFLICT(event_id) DO UPDATE SET
+        cwd         = COALESCE(excluded.cwd, usage_events.cwd),
+        session_id  = COALESCE(excluded.session_id, usage_events.session_id),
+        model       = CASE
+                        WHEN excluded.model IS NULL OR excluded.model = 'unknown'
+                        THEN usage_events.model
+                        ELSE excluded.model
+                      END,
+        provider    = COALESCE(excluded.provider, usage_events.provider),
+        protocol    = COALESCE(excluded.protocol, usage_events.protocol),
+        surface     = COALESCE(excluded.surface, usage_events.surface),
+        originator  = COALESCE(excluded.originator, usage_events.originator),
+        status      = COALESCE(excluded.status, usage_events.status),
+        cost_usd    = COALESCE(excluded.cost_usd, usage_events.cost_usd),
+        cost_source = COALESCE(excluded.cost_source, usage_events.cost_source),
+        latency_ms  = MAX(usage_events.latency_ms, excluded.latency_ms),
+        ttft_ms     = MAX(usage_events.ttft_ms, excluded.ttft_ms)`,
     );
-    let n = 0;
     this.db.exec("BEGIN");
     try {
       for (const e of events) {
-        const r = stmt.run(
+        stmt.run(
           e.id,
           e.tool,
           e.ts,
@@ -208,14 +255,14 @@ export class Store {
           e.surface,
           e.originator,
         );
-        if (r.changes > 0) n++;
       }
       this.db.exec("COMMIT");
     } catch (err) {
       this.db.exec("ROLLBACK");
       throw err;
     }
-    return n;
+    // 新增 = 这批里数据库原本没有的 id（Set 顺带去重）
+    return new Set(ids.filter((id) => !known.has(id))).size;
   }
 
   upsertSession(s) {

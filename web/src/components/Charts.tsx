@@ -95,6 +95,16 @@ interface TrendProps {
 }
 
 /** 多序列堆叠面积趋势图 */
+/** 制图板的定位十字（图纸四角的「+」） */
+function Plus({ x, y, s = 4 }: { x: number; y: number; s?: number }) {
+  return (
+    <g className="axis-mark">
+      <line x1={x - s} y1={y} x2={x + s} y2={y} />
+      <line x1={x} y1={y - s} x2={x} y2={y + s} />
+    </g>
+  );
+}
+
 export function TrendChart({
   labels,
   series,
@@ -168,13 +178,27 @@ export function TrendChart({
           const yy = y(v);
           return (
             <g key={i}>
-              <line x1={PAD.l} y1={yy} x2={W - PAD.r} y2={yy} className="grid-line" />
+              {/* 基线实线（datum），其余为测量虚线 */}
+              <line
+                x1={PAD.l}
+                y1={yy}
+                x2={W - PAD.r}
+                y2={yy}
+                className={i === 0 ? "plot-frame" : "grid-line dashed"}
+              />
               <text x={PAD.l - 10} y={yy + 3.5} className="axis-text" textAnchor="end">
                 {yFormat(v)}
               </text>
             </g>
           );
         })}
+
+        {/* 图框：左 datum 线 + 四角定位十字 */}
+        <line className="plot-frame" x1={PAD.l} y1={PAD.t} x2={PAD.l} y2={PAD.t + ih} />
+        <Plus x={PAD.l} y={PAD.t} />
+        <Plus x={W - PAD.r} y={PAD.t} />
+        <Plus x={PAD.l} y={PAD.t + ih} />
+        <Plus x={W - PAD.r} y={PAD.t + ih} />
 
         {/* 面积层：用 clipPath 从左向右揭示，和折线同步生长 */}
         <g clipPath="url(#reveal)">
@@ -211,15 +235,36 @@ export function TrendChart({
 
         {labels.map((l, i) =>
           i % tickEvery === 0 || i === n - 1 ? (
-            <text key={l} x={x(i)} y={H - 7} className="axis-text" textAnchor="middle">
-              {xFormat(l)}
-            </text>
+            <g key={l}>
+              {/* x 轴刻度：3px 短竖线，制图板的刻度约定 */}
+              <line className="axis-tick" x1={x(i)} y1={PAD.t + ih} x2={x(i)} y2={PAD.t + ih + 3} />
+              <text x={x(i)} y={H - 7} className="axis-text" textAnchor="middle">
+                {xFormat(l)}
+              </text>
+            </g>
           ) : null,
         )}
+
+        {/* 端点方块标记：制图板用方形端点，不用圆点 */}
+        {n > 0 &&
+          series.map((s, i) => (
+            <rect
+              key={`end-${s.key}`}
+              className="series-end"
+              x={x(n - 1) - 2}
+              y={y(cum[i][n - 1]) - 2}
+              width={4}
+              height={4}
+              fill={s.color}
+              style={{ opacity: inView ? 1 : 0, transition: "opacity .5s ease 1.1s" }}
+            />
+          ))}
 
         {hi != null && (
           <g>
             <line x1={x(hi)} y1={PAD.t} x2={x(hi)} y2={PAD.t + ih} className="hover-line" />
+            {/* 光标顶端的定位十字，读起来像游标卡尺 */}
+            <Plus x={x(hi)} y={PAD.t} />
             {series.map((s, i) => (
               <circle
                 key={s.key}
@@ -365,7 +410,33 @@ export function DonutChart({
     <div className="donut-wrap" ref={ref}>
       <div className="donut" style={{ width: size, height: size }}>
         <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
-          <circle cx={size / 2} cy={size / 2} r={R} fill="none" stroke="var(--surface-sunk)" strokeWidth={thickness} />
+          {/* 制图板：内外两道 datum 圈 + 12 点起始刻度。
+              环图原来是「一条粗环浮在纸上」，没有内外基准线；
+              加上这两圈之后弧线才有落点，和全站的方角方框语言对得上。 */}
+          <circle
+            cx={size / 2}
+            cy={size / 2}
+            r={R + thickness / 2 + 3}
+            fill="none"
+            stroke="var(--line)"
+            strokeWidth={1}
+          />
+          <circle
+            cx={size / 2}
+            cy={size / 2}
+            r={R - thickness / 2 - 3}
+            fill="none"
+            stroke="var(--line)"
+            strokeWidth={1}
+          />
+          <line
+            x1={size / 2}
+            y1={size / 2 - R - thickness / 2 - 6}
+            x2={size / 2}
+            y2={size / 2 - R - thickness / 2 - 1}
+            stroke="var(--ink-3)"
+            strokeWidth={1}
+          />
           {inView &&
             arcs.map((a, i) => (
               <circle
@@ -435,9 +506,10 @@ export function HourBars({
     total_tokens?: number;
     perMinute?: number;
     genPerMinute?: number;
+    /** 输出 token ÷ 生成区间秒数（「模型速度」用的口径） */
+    tok_per_sec?: number;
   }[];
-  // genPerMinute = 输出 token/活跃分钟（速率区块的生成速度口径）
-  valueKey?: "requests" | "total_tokens" | "perMinute" | "genPerMinute";
+  valueKey?: "requests" | "total_tokens" | "perMinute" | "genPerMinute" | "tok_per_sec";
   format?: (n: number) => string;
   highlight?: ((h: number) => string | null) | null;
 }) {

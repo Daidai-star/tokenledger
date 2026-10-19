@@ -17,8 +17,8 @@ export type Band = 0 | 1 | 2 | 3;
 export interface MallItem {
   id: string;
   name: string;
-  /** 用 emoji 当图标：不引入图片资源，跨平台也不会缺字 */
-  emoji: string;
+  /** 图标 id，对应 mall-icons.ts 里的 MALL_ICONS key（手绘技术线稿，不是 emoji） */
+  icon: string;
   /** 参考零售价，单位元 */
   price: number;
   band: Band;
@@ -40,25 +40,25 @@ export const BAND_HINTS = [
  * 价格均为参考零售价，不是实时报价。
  */
 export const MALL: MallItem[] = [
-  { id: "beans", name: "手冲咖啡豆 250g", emoji: "☕", price: 88, band: 0, hint: "写代码的燃料，也是燃料的燃料" },
-  { id: "beer", name: "精酿啤酒 24 罐", emoji: "🍺", price: 228, band: 0, hint: "debug 到凌晨三点的人配得上它" },
-  { id: "headphone", name: "头戴降噪耳机", emoji: "🎧", price: 1299, band: 0, hint: "隔绝世界，只隔绝需求评审会" },
-  { id: "keyboard", name: "客制化机械键盘", emoji: "⌨️", price: 1880, band: 0, hint: "每个键都是一次投资" },
+  { id: "beans", name: "手冲咖啡豆 250g", icon: "beans", price: 88, band: 0, hint: "写代码的燃料，也是燃料的燃料" },
+  { id: "beer", name: "精酿啤酒 24 罐", icon: "beer", price: 228, band: 0, hint: "debug 到凌晨三点的人配得上它" },
+  { id: "headphone", name: "头戴降噪耳机", icon: "headphone", price: 1299, band: 0, hint: "隔绝世界，只隔绝需求评审会" },
+  { id: "keyboard", name: "客制化机械键盘", icon: "keyboard", price: 1880, band: 0, hint: "每个键都是一次投资" },
 
-  { id: "monitor", name: "27 寸 4K 显示器", emoji: "🖥️", price: 2899, band: 1, hint: "能同时看见报错和修复" },
-  { id: "fishing", name: "4.5m 竞技钓鱼竿", emoji: "🎣", price: 4280, band: 1, hint: "把等待变成一种生产力" },
-  { id: "ps5", name: "PS5 Pro + 双手柄", emoji: "🎮", price: 6499, band: 1, hint: "打完主线就去改需求" },
-  { id: "camera", name: "富士 X100VI 相机", emoji: "📷", price: 13800, band: 1, hint: "记录你去的那些地方" },
-  { id: "gpu", name: "RTX 5090 显卡", emoji: "🔋", price: 17999, band: 1, hint: "本地跑模型，从此不求人" },
-  { id: "ebike", name: "碳纤维电动公路车", emoji: "🚲", price: 22800, band: 1, hint: "比骑车去上班快，也更贵" },
+  { id: "monitor", name: "27 寸 4K 显示器", icon: "monitor", price: 2899, band: 1, hint: "能同时看见报错和修复" },
+  { id: "fishing", name: "4.5m 竞技钓鱼竿", icon: "fishing", price: 4280, band: 1, hint: "把等待变成一种生产力" },
+  { id: "ps5", name: "PS5 Pro + 双手柄", icon: "ps5", price: 6499, band: 1, hint: "打完主线就去改需求" },
+  { id: "camera", name: "富士 X100VI 相机", icon: "camera", price: 13800, band: 1, hint: "记录你去的那些地方" },
+  { id: "gpu", name: "RTX 5090 显卡", icon: "gpu", price: 17999, band: 1, hint: "本地跑模型，从此不求人" },
+  { id: "ebike", name: "碳纤维电动公路车", icon: "ebike", price: 22800, band: 1, hint: "比骑车去上班快，也更贵" },
 
-  { id: "laptop", name: "MacBook Pro 16 英寸", emoji: "💻", price: 29999, band: 2, hint: "顶盖上贴着 Never Issue Again" },
-  { id: "moto", name: "川崎 ZX-6R 摩托车", emoji: "🏍️", price: 86000, band: 2, hint: "排量不小，衣柜更小" },
-  { id: "car", name: "一台家用轿车", emoji: "🚗", price: 128000, band: 2, hint: "通勤半径从此不再受限于地铁" },
-  { id: "rv", name: "一辆房车", emoji: "🏕️", price: 1180000, band: 2, hint: "把家和网线一起拖走" },
+  { id: "laptop", name: "MacBook Pro 16 英寸", icon: "laptop", price: 29999, band: 2, hint: "顶盖上贴着 Never Issue Again" },
+  { id: "moto", name: "川崎 ZX-6R 摩托车", icon: "moto", price: 86000, band: 2, hint: "排量不小，衣柜更小" },
+  { id: "car", name: "一台家用轿车", icon: "car", price: 128000, band: 2, hint: "通勤半径从此不再受限于地铁" },
+  { id: "rv", name: "一辆房车", icon: "rv", price: 1180000, band: 2, hint: "把家和网线一起拖走" },
 
-  { id: "helicopter", name: "罗宾逊 R44 直升机", emoji: "🚁", price: 6800000, band: 3, hint: "从此不用等红灯" },
-  { id: "jet", name: "二手 Citation 公务机", emoji: "✈️", price: 58000000, band: 3, hint: "落地直接进会议室" },
+  { id: "helicopter", name: "罗宾逊 R44 直升机", icon: "helicopter", price: 6800000, band: 3, hint: "从此不用等红灯" },
+  { id: "jet", name: "二手 Citation 公务机", icon: "jet", price: 58000000, band: 3, hint: "落地直接进会议室" },
 ];
 
 export interface MallRow extends MallItem {
@@ -76,6 +76,13 @@ export interface CartLine {
   count: number;
   /** 这一行占掉的总金额 */
   total: number;
+}
+
+export interface MallContext {
+  /** 累计活跃编码小时数（用于把账单换算成「每小时多少钱」） */
+  activeHours?: number;
+  /** 日均成本（元/天），用于把差额翻译成「还要写几天」 */
+  dailyCost?: number;
 }
 
 export interface MallResult {
@@ -99,6 +106,14 @@ export interface MallResult {
   best: MallRow | null;
   /** 「攒钱进度」：从当前最高档到下一档的完成度 0..1 */
   savingTo: { item: MallRow; progress: number; need: number } | null;
+  /** 累计活跃编码小时（0 = 没传） */
+  activeHours: number;
+  /** 每个活跃编码小时烧掉多少元 */
+  perHour: number;
+  /** 日均成本（元/天），0 = 没传 */
+  dailyCost: number;
+  /** 按日均成本算，还要写多少天才能拿下下一件；没有日均数据时为 null */
+  daysTo: number | null;
 }
 
 /** 单件商品的数量上限，避免预算极大时出现「12345 份咖啡豆」的噪音 */
@@ -108,8 +123,9 @@ const MAX_QTY = 999;
  * 计算购买力。
  *
  * @param costUsd 累计预估成本（美元）；传 null / 0 会得到空购物车而不是报错
+ * @param ctx     可选的上下文（活跃小时 / 日均成本），用来把金额翻译成时间
  */
-export function computeMall(costUsd: number | null | undefined): MallResult {
+export function computeMall(costUsd: number | null | undefined, ctx: MallContext = {}): MallResult {
   const usd = Number(costUsd);
   const safeUsd = Number.isFinite(usd) && usd > 0 ? usd : 0;
   const budget = safeUsd * USD_CNY;
@@ -185,6 +201,10 @@ export function computeMall(costUsd: number | null | undefined): MallResult {
     savingTo.progress = Math.max(0, Math.min(1, savingTo.progress));
   }
 
+  // 时间维度：把「多少钱」翻译成「我写了多久」
+  const activeHours = Number(ctx.activeHours) > 0 ? Number(ctx.activeHours) : 0;
+  const dailyCost = Number(ctx.dailyCost) > 0 ? Number(ctx.dailyCost) : 0;
+
   return {
     rate: USD_CNY,
     budget,
@@ -198,18 +218,92 @@ export function computeMall(costUsd: number | null | undefined): MallResult {
     tier,
     best,
     savingTo,
+    activeHours,
+    perHour: activeHours > 0 ? budget / activeHours : 0,
+    dailyCost,
+    daysTo: dailyCost > 0 && next ? next.shortfall / dailyCost : null,
   };
 }
 
-/** 购物车文案：挑出占比最高的 4 件，拼成一句话 */
+/**
+ * 日均成本：优先用最近 30 天里**有花费**的天的平均。
+ *
+ * 为什么不用全期平均：「再写几天」问的是**当下**的速度。一个用了半年的
+ * 账单，早期几乎不烧钱，全期平均会把当下的速度稀释掉，算出来的天数虚高。
+ * 样本不足 7 天时（比如刚装）才退回全期平均，避免一天的噪声被当成趋势。
+ */
+export function estimateDailyCost(
+  days: { cost_usd: number }[],
+  totalCost: number,
+  activeDays: number,
+): number {
+  const recent = days.slice(-30).filter((d) => Number(d.cost_usd) > 0);
+  if (recent.length >= 7) {
+    return recent.reduce((a, d) => a + Number(d.cost_usd), 0) / recent.length;
+  }
+  return activeDays > 0 ? Number(totalCost) / activeDays : 0;
+}
+
+/** 购物车文案：挑出占比最高的几件，拼成一句话 */
 export function cartSummary(cart: CartLine[], max = 4): string {
   if (!cart.length) return "";
   const top = [...cart]
     .sort((a, b) => b.total - a.total)
     .slice(0, max)
-    .map((c) => `${c.item.emoji} ${c.count} ${c.item.name}`);
+    .map((c) => `${c.count} × ${c.item.name}`);
   const rest = cart.length - top.length;
   return top.join(" + ") + (rest > 0 ? ` 等 ${cart.length} 件` : "");
+}
+
+/**
+ * 「乱花一通」：随机把这笔钱花掉，生成一张小票。
+ *
+ * 刻意**不是**均匀随机——均匀随机会立刻退化成「一百多包咖啡豆」，
+ * 因为最便宜的商品永远买得起。这里按**单价加权**挑商品（贵的东西更可能被看中），
+ * 并且一次买 1..N 件（N 随剩余预算放大），结果才会既不可预测、又像真的在下单。
+ *
+ * 纯函数：随机源从参数注入，所以能写确定性测试。
+ */
+export function randomCart(
+  rows: MallRow[],
+  budget: number,
+  rng: () => number = Math.random,
+  maxSteps = 400,
+): { cart: CartLine[]; total: number; left: number } {
+  const lines = new Map<string, CartLine>();
+  let left = budget;
+  let step = 0;
+
+  while (left > 0 && step++ < maxSteps) {
+    const usable = rows.filter((r) => r.price <= left);
+    if (!usable.length) break;
+
+    const totalW = usable.reduce((a, r) => a + r.price, 0);
+    let pick = rng() * totalW;
+    let chosen = usable[usable.length - 1];
+    for (const r of usable) {
+      pick -= r.price;
+      if (pick <= 0) {
+        chosen = r;
+        break;
+      }
+    }
+
+    const affordable = Math.floor(left / chosen.price);
+    // 一次买几件：预算越大越可能多拿，否则会退化成一件一件加
+    const span = Math.max(1, Math.min(affordable, Math.round(left / 2000) + 1, 8));
+    const n = 1 + Math.floor(rng() * span);
+
+    const line = lines.get(chosen.id);
+    const count = Math.min(MAX_QTY, (line?.count || 0) + n);
+    const delta = count - (line?.count || 0);
+    if (delta <= 0) break; // 撞到单件上限，再转下去也花不掉钱
+    lines.set(chosen.id, { item: chosen, count, total: count * chosen.price });
+    left -= delta * chosen.price;
+  }
+
+  const cart = [...lines.values()].sort((a, b) => b.total - a.total);
+  return { cart, total: cart.reduce((a, c) => a + c.total, 0), left: Math.max(0, left) };
 }
 
 /** 金额格式化：元。万以下用千分位，这样 ¥7,200 比 ¥7.2 千 好懂得多 */

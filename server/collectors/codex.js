@@ -33,7 +33,7 @@ export const codex = new Collector({
   id: "codex",
   name: "Codex",
   website: "https://developers.openai.com/codex",
-  color: "#6b8e6b",
+  color: "#fa3600",
   roots: [path.join(os.homedir(), ".codex", "sessions")],
   detect: () => fs.existsSync(path.join(os.homedir(), ".codex")),
   async scan(ctx) {

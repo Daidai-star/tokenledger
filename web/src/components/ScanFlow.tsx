@@ -1,4 +1,3 @@
-import { useEffect, useState } from "react";
 import type { ScanProgress, ToolMeta } from "../types";
 import { fmtInt } from "../format";
 
@@ -43,27 +42,10 @@ function toolNameOf(tools: ToolMeta[], id: string): string {
 interface Props {
   progress: ScanProgress;
   tools: ToolMeta[];
-  onScan: () => void;
-  onReset: () => void;
 }
 
-export default function ScanFlow({ progress, tools, onScan, onReset }: Props) {
+export default function ScanFlow({ progress, tools }: Props) {
   const running = progress.running;
-  const [confirmReset, setConfirmReset] = useState(false);
-  const [pulse, setPulse] = useState(0);
-
-  // 运行时用轻量脉冲强化「正在工作」的感知
-  useEffect(() => {
-    if (!running) return;
-    const t = setInterval(() => setPulse((p) => p + 1), 900);
-    return () => clearInterval(t);
-  }, [running]);
-
-  useEffect(() => {
-    if (!confirmReset) return;
-    const t = setTimeout(() => setConfirmReset(false), 4000);
-    return () => clearTimeout(t);
-  }, [confirmReset]);
 
   const finished = progress.stage === "done";
   // 已完成时所有节点都是 done（含最后一个）；运行时最后未到的节点是 pending
@@ -72,28 +54,6 @@ export default function ScanFlow({ progress, tools, onScan, onReset }: Props) {
 
   return (
     <div className={`scan-flow${running ? " running" : ""}`}>
-      <header className="scan-flow-head">
-        <div className="scan-actions">
-          <button className="btn primary" onClick={onScan} disabled={running}>
-            {running ? "采集中" : "重新扫描"}
-          </button>
-          <button
-            className={`btn ghost${confirmReset ? " danger" : ""}`}
-            onClick={() => {
-              if (!confirmReset) {
-                setConfirmReset(true);
-                return;
-              }
-              setConfirmReset(false);
-              onReset();
-            }}
-            disabled={running}
-          >
-            {confirmReset ? "确认清库重扫？" : "清库重扫"}
-          </button>
-        </div>
-      </header>
-
       {/* 阶段流水线 */}
       <div className="pipeline">
         {STAGES.map((s, i) => {

@@ -75,6 +75,21 @@ export function fmtDuration(ms: number): string {
   return `${Math.floor(s / 60)}m${Math.round(s % 60)}s`;
 }
 
+/**
+ * 紧凑时长（入参是**秒**）。
+ *
+ * 和 fmtDuration 的区别：后者是给「单次操作耗时」用的（`13m13s` 有意义），
+ * 而这个给「累计生成时长」用——累计可以到几百分钟甚至几天，
+ * 写成 `543m16s` 既难读又会撑爆卡片布局。
+ */
+export function fmtSpan(sec: number): string {
+  if (!sec || sec < 0) return "—";
+  if (sec < 60) return `${Math.round(sec)}s`;
+  if (sec < 3600) return `${Math.floor(sec / 60)}m`;
+  if (sec < 86400) return `${(sec / 3600).toFixed(1)}h`;
+  return `${(sec / 86400).toFixed(1)}d`;
+}
+
 /** 短路径：~/workspace/foo -> ~/ws/foo 的简化版，只保留最后两段 */
 export function shortPath(p: string | null): string {
   if (!p) return "—";
@@ -91,12 +106,13 @@ export function hueOf(s: string): number {
 }
 
 /**
- * 数据色板：低饱和、有质感。
- * 呼应 Anthropic 的暖调——不能用高饱和霓虹色，会破坏整体的克制感。
+ * 数据色板：Heron 化的低饱和色 —— 引导色是强调橘红，
+ * 其余降饱和偏墨，保证橘红始终是图里最亮的一点。
+ * 与 styles.css 的 --c-* 同源（那边给 CSS 用，这边给 SVG 直接取 hex）。
  */
 export const MODEL_COLORS = [
-  "#c15f3c", "#6b8e6b", "#5b7a99", "#c09553", "#8b6f8e",
-  "#4f7d6e", "#b08968", "#7a8794", "#9a6b53", "#6b7f5e",
+  "#fa3600", "#c0842f", "#3f6f5e", "#4f6f8a", "#8a7a5c",
+  "#7d5a6b", "#6f8a5f", "#6b7787", "#a4552e", "#5a6b4a",
 ];
 
 export function modelColor(model: string): string {

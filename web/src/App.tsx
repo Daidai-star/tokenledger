@@ -19,9 +19,16 @@ import {
   WasteSection,
 } from "./components/Insights";
 import { MallSection } from "./components/Mall";
-import { Reveal, RevealGroup } from "./reveal";
+import { estimateDailyCost } from "./mall";
+import { Reveal } from "./reveal";
 import { TABS, sectionsInTab } from "./sections";
 import ScanFlow from "./components/ScanFlow";
+import Boot from "./components/Boot";
+import Cursor from "./components/Cursor";
+import Deco from "./components/Deco";
+import Marquee from "./components/Marquee";
+import { scrollWindowTo, startSmoothScroll } from "./motion/smoothScroll";
+import { mountSiteMotion } from "./motion/effects";
 import { fetchDashboard, triggerReset, triggerScan } from "./api";
 import type { Dashboard, Range, ScanProgress, ToolMeta, ToolSeriesCell } from "./types";
 import {
@@ -30,7 +37,7 @@ import {
   fmtCost,
   fmtDateFull,
   fmtInt,
-  fmtMs,
+  fmtSpan,
   fmtTime,
   modelColor,
   shortPath,
@@ -63,117 +70,149 @@ function useCountUp(value: number, ms = 650) {
   return display;
 }
 
-function Metric({
-  label,
-  value,
-  sub,
-  delay = 0,
-}: {
-  label: string;
-  value: string;
-  sub?: string;
-  delay?: number;
-}) {
+/**
+ * 账本抬头（图纸标题栏）。
+ *
+ * 原来是 Codex profile 式的「身份环 + 问候语 + 导语 + 四个事实 + 工具条」，
+ * 约 900px 高，且每一栏都重复出现——它回答的是「你是谁」，不是「账目如何」。
+ * 现在收成一块标题栏：一行标题 + 六格指标，指标与滚动无关、永远可读。
+ * 连续天数从「大圆环」降级成一格数字：它是个数据，不是图腾。
+ */
+function LedgerHeader({ data }: { data: Dashboard }) {
+  const { profile, overview } = data;
+  const streak = useCountUp(profile.currentStreak);
+  const active = data.tools.filter((t) => data.byTool.some((r) => r.tool === t.id));
+
+  const cells: { k: string; v: string; s: string }[] = [
+    {
+      k: "累计 Token",
+      v: tokens(overview.total_tokens),
+      s: `输出 ${tokens(overview.output_tokens)} · 推理 ${tokens(overview.reasoning_tokens)}`,
+    },
+    { k: "请求", v: fmtInt(overview.requests), s: `${fmtInt(overview.sessions)} 会话` },
+    {
+      k: "预估成本",
+      v: fmtCost(overview.cost_usd),
+      s: `${fmtCost(overview.requests ? overview.cost_usd / overview.requests : 0)}/请求`,
+    },
+    {
+      k: "缓存命中",
+      v: `${overview.cache_hit_rate}%`,
+      s: `${tokens(overview.cache_read_tokens)} 读取`,
+    },
+    { k: "连续天数", v: String(Math.round(streak)), s: `最长 ${profile.longestStreak} 天` },
+    { k: "活跃日", v: fmtInt(profile.totalActiveDays), s: `${overview.models} 个模型` },
+  ];
+
   return (
-    <div className="stat" style={{ animationDelay: `${delay}ms` }}>
-      <div className="stat-label">{label}</div>
-      <div className="stat-value">{value}</div>
-      {sub && <div className="stat-sub">{sub}</div>}
-    </div>
+    <section className="ledger-head">
+      <div className="ledger-title">
+        <div className="eyebrow">本机 CODING AI · 用量账本</div>
+        <h1 className="ledger-h1">用量总账</h1>
+        <p className="ledger-lede">
+          汇总 {active.length} 个工具在 {profile.totalActiveDays} 个活跃日里的模型调用，
+          覆盖 {overview.models} 个模型。
+        </p>
+      </div>
+
+      <dl className="ledger-cells">
+        {cells.map((c, i) => (
+          <div className="ledger-cell" key={c.k} style={{ animationDelay: `${i * 45}ms` }}>
+            <dt className="eyebrow">{c.k}</dt>
+            <dd className="ledger-v">{c.v}</dd>
+            <dd className="ledger-s">{c.s}</dd>
+          </div>
+        ))}
+      </dl>
+    </section>
   );
 }
 
-/** Codex profile 风格的档案头 */
-function ProfileHeader({ data }: { data: Dashboard }) {
-  const { profile, overview } = data;
-  const streak = useCountUp(profile.currentStreak);
-  const hour = new Date().getHours();
-  const greet = hour < 6 ? "夜深了" : hour < 12 ? "早上好" : hour < 18 ? "下午好" : "晚上好";
-  const byToolId = useMemo(
-    () => new Map(data.byTool.map((r) => [r.tool, r])),
-    [data.byTool],
-  );
-  const active = data.tools.filter((t) => byToolId.has(t.id));
-
-  // 身份环：外环 = 当前连续 / 最长连续，内环 = 平均强度占比
-  const C = 2 * Math.PI * 80;
-  const longest = Math.max(1, profile.longestStreak);
-  const outer = Math.min(1, profile.currentStreak / 30);
-  const inner = Math.min(1, profile.avgRequestsPerDay / 60);
+/**
+ * 右侧边栏（图纸的「边栏」）。
+ *
+ * 原站右缘有一条窄栏放印章与竖排文字。这里把「账本状态 / 工具占比 / 操作」
+ * 三件事收进去，让它们**常驻**——之前散在顶栏、档案头、采集流程里，
+ * 每次想知道「上次什么时候扫的」都要滚到某一栏。
+ */
+function Rail({
+  data,
+  progress,
+  onScan,
+  onReset,
+}: {
+  data: Dashboard;
+  progress: ScanProgress;
+  onScan: () => void;
+  onReset: () => void;
+}) {
+  const { overview } = data;
+  const max = Math.max(1, ...data.byTool.map((r) => r.total_tokens));
+  const installed = data.tools.filter((t) => t.installed);
 
   return (
-    <section className="profile">
-      <div className="profile-mark">
-        <svg viewBox="0 0 172 172">
-          <circle cx="86" cy="86" r="80" className="ring-bg" />
-          <circle
-            cx="86"
-            cy="86"
-            r="80"
-            className="ring-fg"
-            strokeDasharray={C}
-            strokeDashoffset={C * (1 - outer)}
-          />
-          <circle
-            cx="86"
-            cy="86"
-            r="68"
-            className="ring-inner"
-            strokeDasharray={2 * Math.PI * 68}
-            strokeDashoffset={2 * Math.PI * 68 * (1 - inner)}
-          />
-        </svg>
-        <div className="profile-mark-inner">
-          <div className="profile-initial">{streak.toFixed(0)}</div>
-          <div className="profile-initial-label">连续天数</div>
-        </div>
+    <aside className="rail">
+      <div className="rail-block">
+        <div className="eyebrow rail-h">账本状态</div>
+        <dl className="rail-kv">
+          <dt>数据范围</dt>
+          <dd>
+            {overview.data_from} → {overview.data_to}
+          </dd>
+          <dt>上次扫描</dt>
+          <dd>{data.lastScan ? fmtAgo(data.lastScan.finished_at) : "—"}</dd>
+          <dt>落库事件</dt>
+          <dd>{fmtInt(data.dataRange.events)}</dd>
+          <dt>定价源</dt>
+          <dd>{data.pricingSource}</dd>
+        </dl>
       </div>
 
-      <div className="profile-body">
-        <div className="profile-eyebrow">{greet}</div>
-        <h1 className="profile-title">本机 Coding 用量</h1>
-        <p className="profile-lede">
-          汇总 {active.length} 个 AI 编程工具在 {profile.totalActiveDays} 个活跃日里的模型调用——
-          累计 {tokens(overview.total_tokens)} token，预估成本 {fmtCost(overview.cost_usd)}，
-          涉及 {overview.models} 个模型。
-        </p>
-
-        <dl className="profile-facts">
-          <div className="profile-fact">
-            <dt>累计 Token</dt>
-            <dd>{tokens(profile.totalTokens)}</dd>
-          </div>
-          <div className="profile-fact">
-            <dt>请求</dt>
-            <dd>{fmtInt(profile.totalRequests)}</dd>
-          </div>
-          <div className="profile-fact">
-            <dt>会话</dt>
-            <dd>{fmtInt(overview.sessions)}</dd>
-          </div>
-          <div className="profile-fact">
-            <dt>最长连续</dt>
-            <dd>
-              {profile.longestStreak}
-              <small>天 / 共 {longest}</small>
-            </dd>
-          </div>
-        </dl>
-
-        <div className="profile-tools">
-          {active.map((t) => {
-            const row = byToolId.get(t.id)!;
+      <div className="rail-block">
+        <div className="eyebrow rail-h">工具占比</div>
+        <div className="rail-tools">
+          {data.byTool.map((r) => {
+            const t = data.tools.find((x) => x.id === r.tool);
             return (
-              <span key={t.id} className="profile-tool">
-                <span className="dot" style={{ background: t.color }} />
-                {t.name}
-                <em>{tokens(row.total_tokens)}</em>
-              </span>
+              <div className="rail-tool" key={r.tool}>
+                <div className="rail-tool-top">
+                  <span className="rail-tool-name">
+                    <i className="rail-dot" style={{ background: t?.color || "var(--ink-3)" }} />
+                    {t?.name || r.tool}
+                  </span>
+                  <span className="rail-tool-val">{tokens(r.total_tokens)}</span>
+                </div>
+                <div className="rail-bar">
+                  <span
+                    style={{
+                      width: `${(r.total_tokens / max) * 100}%`,
+                      background: t?.color || "var(--ink-3)",
+                    }}
+                  />
+                </div>
+              </div>
             );
           })}
         </div>
       </div>
-    </section>
+
+      <div className="rail-block rail-actions">
+        <div className="eyebrow rail-h">
+          操作 {progress.running && <span className="live-dot" />}
+        </div>
+        <button className="btn primary rail-btn" onClick={onScan} disabled={progress.running}>
+          {progress.running ? `采集中 ${Math.round(progress.percent)}%` : "重新扫描"}
+        </button>
+        <button className="btn rail-btn" onClick={onReset} disabled={progress.running}>
+          清库重扫
+        </button>
+        <p className="rail-note">
+          {progress.running
+            ? `${fmtInt(progress.filesParsed || 0)} / ${fmtInt(progress.filesSeen || 0)} 文件`
+            : `${installed.length} / ${data.tools.length} 个工具已装`}
+        </p>
+      </div>
+    </aside>
   );
 }
 
@@ -193,17 +232,44 @@ function Toolbar({
     [byTool],
   );
 
-  const daysAgo = (n: number) => {
+  /**
+   * 本地日期。**不能用 `toISOString()`** —— 那是 UTC，东八区晚上 8 点后
+   * 会算成「明天」，于是「今天」这一天永远查不到数据。
+   */
+  const ymd = (d: Date) => {
+    const p = (n: number) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+  };
+  const daysBefore = (n: number) => {
     const d = new Date();
     d.setDate(d.getDate() - n);
-    return d.toISOString().slice(0, 10);
+    return ymd(d);
   };
+  const today = ymd(new Date());
+  const [customOpen, setCustomOpen] = useState(false);
+
+  // days = 窗口长度（含今天）。0 = 全部历史。
   const presets = [
+    { label: "今天", days: 1 },
     { label: "7 天", days: 7 },
     { label: "30 天", days: 30 },
     { label: "90 天", days: 90 },
     { label: "全部", days: 0 },
   ];
+
+  const fromOf = (days: number) => (days <= 1 ? today : daysBefore(days - 1));
+  const isPresetActive = (days: number) =>
+    days === 0
+      ? !range.from && !range.to
+      : range.from === fromOf(days) && range.to === today;
+  const isCustomActive = !!range.from && !presets.some((p) => isPresetActive(p.days));
+
+  const applyPreset = (days: number) =>
+    setRange({
+      tools: range.tools,
+      from: days === 0 ? undefined : fromOf(days),
+      to: days === 0 ? undefined : today,
+    });
 
   const toggleTool = (id: string) => {
     const cur = range.tools || [];
@@ -216,19 +282,44 @@ function Toolbar({
       <div className="tb-group">
         <span className="tb-label">范围</span>
         <div className="segmented">
-          {presets.map((p) => {
-            const active = p.days === 0 ? !range.from : range.from === daysAgo(p.days);
-            return (
-              <button
-                key={p.label}
-                className={active ? "on" : ""}
-                onClick={() => setRange({ ...range, from: p.days === 0 ? undefined : daysAgo(p.days) })}
-              >
-                {p.label}
-              </button>
-            );
-          })}
+          {presets.map((p) => (
+            <button
+              key={p.label}
+              className={isPresetActive(p.days) ? "on" : ""}
+              onClick={() => applyPreset(p.days)}
+            >
+              {p.label}
+            </button>
+          ))}
+          <button
+            className={isCustomActive || customOpen ? "on" : ""}
+            onClick={() => setCustomOpen((v) => !v)}
+          >
+            自定义
+          </button>
         </div>
+        {(customOpen || isCustomActive) && (
+          <span className="range-custom">
+            <input
+              type="date"
+              value={range.from || ""}
+              max={range.to || today}
+              onChange={(e) => setRange({ ...range, from: e.target.value || undefined })}
+            />
+            <span className="range-dash">→</span>
+            <input
+              type="date"
+              value={range.to || ""}
+              min={range.from || undefined}
+              onChange={(e) => setRange({ ...range, to: e.target.value || undefined })}
+            />
+            {isCustomActive && (
+              <button className="range-clear" onClick={() => { setRange({ tools: range.tools }); setCustomOpen(false); }}>
+                清除
+              </button>
+            )}
+          </span>
+        )}
       </div>
 
       <div className="tb-group">
@@ -255,6 +346,125 @@ function Toolbar({
 }
 
 /**
+ * 模型速度。
+ *
+ * 上半：**每个工具最近一次会话**用的模型与速度（这是最常问的问题：
+ *       「我现在这个工具跑的是什么模型、多快」）。
+ * 下半：当前时间范围内各模型的输出速度排行。
+ *
+ * 口径要写清楚：日志里没有逐请求耗时，所以这里量的是**吞吐**
+ * （output tokens / 活跃分钟），不是首 token 延迟。界面上直接标明，
+ * 免得被当成延迟读。
+ */
+function SpeedSection({ data }: { data: Dashboard }) {
+  const sp = data.speed;
+  const toolName = (id: string) => data.tools.find((t) => t.id === id)?.name || id;
+  const toolColor = (id: string) => data.tools.find((t) => t.id === id)?.color || "var(--ink-3)";
+
+  if (!sp) return null;
+  const maxSpd = Math.max(1, ...sp.byModel.map((m) => m.tok_per_sec));
+  const o = sp.overall;
+
+  return (
+    <section className="section">
+      <div className="section-head">
+        <div>
+          <h2>模型速度</h2>
+          <div className="sub">
+            输出 token ÷ <b>生成区间</b> —— 同会话里相邻两次请求的间隔，就是后一次的生成时长。
+            日志没有逐请求耗时，所以这是<b>估算</b>；且区间里含工具调用时间，结果偏保守。
+          </div>
+        </div>
+        <div className="speed-overall">
+          全站 <b>{o.tok_per_sec.toFixed(1)}</b>
+          <small>tok/s</small> · 每请求 <b>{fmtInt(o.out_per_req)}</b>
+          <small>tok</small>
+        </div>
+      </div>
+
+      {/* 每个工具最近一次会话 */}
+      <div className="speed-latest">
+        {sp.latestByTool.map((s) => (
+          <article className="speed-card" key={s.tool}>
+            <header className="speed-card-head">
+              <span className="dot" style={{ background: toolColor(s.tool) }} />
+              <span className="speed-tool">{toolName(s.tool)}</span>
+              <span className="speed-ago">{fmtAgo(s.last_ts)}</span>
+            </header>
+            <div className="speed-model">{bareModel(s.model || "—")}</div>
+            <div className="speed-path" title={s.cwd || ""}>
+              {shortPath(s.cwd || "")}
+            </div>
+            <div className="speed-headline">
+              {s.tok_per_sec.toFixed(1)}
+              <small>tok/s</small>
+              <span className="speed-headline-note">生成期间输出速率</span>
+            </div>
+            <dl className="speed-metrics">
+              <div>
+                <dt>生成区间</dt>
+                <dd>
+                  {fmtInt(s.intervals)}
+                  <small>个</small>
+                </dd>
+              </div>
+              <div>
+                <dt>生成时长</dt>
+                <dd>{fmtSpan(s.gen_seconds)}</dd>
+              </div>
+              <div>
+                <dt>每请求</dt>
+                <dd>
+                  {fmtInt(s.out_per_req)}
+                  <small>tok</small>
+                </dd>
+              </div>
+              <div>
+                <dt>输出 token</dt>
+                <dd>{tokens(s.out_tokens)}</dd>
+              </div>
+            </dl>
+            <div className="speed-foot">
+              {fmtInt(s.requests)} 次请求 · 总量 {tokens(s.tokens)}
+              {s.cache_read > 0 && <> · 缓存 {tokens(s.cache_read)}</>}
+            </div>
+          </article>
+        ))}
+        {!sp.latestByTool.length && <div className="empty-hint">还没有会话记录</div>}
+      </div>
+
+      {/* 模型速度排行 */}
+      <div className="section-head" style={{ marginTop: 32 }}>
+        <div>
+          <h2 style={{ fontSize: 16 }}>按模型</h2>
+        </div>
+        <span className="sub">当前时间范围内，按输出 token 排序</span>
+      </div>
+      <div className="speed-rows">
+        {sp.byModel.map((m) => (
+          <div className="speed-row" key={m.model}>
+            <span className="speed-row-name" title={m.model}>
+              {bareModel(m.model)}
+            </span>
+            <span className="speed-row-track">
+              <i style={{ width: `${(m.tok_per_sec / maxSpd) * 100}%` }} />
+            </span>
+            <span className="speed-row-val">
+              {m.tok_per_sec.toFixed(1)}
+              <small>tok/s</small>
+            </span>
+            <span className="speed-row-sub">
+              {fmtInt(m.requests)} 次 · 区间 {fmtInt(m.intervals)} · 每请求 {fmtInt(m.out_per_req)} tok
+            </span>
+          </div>
+        ))}
+        {!sp.byModel.length && <div className="empty-hint">当前范围内没有数据</div>}
+      </div>
+    </section>
+  );
+}
+
+/**
  * 用量与成本区块。
  *
  * 之前这里是「Token 速率」，主指标是 tok/s。用户看完 CC Switch 的统计后
@@ -269,11 +479,12 @@ function RateSection({ data }: { data: Dashboard }) {
   const r = data.rate;
   const o = r.overall;
   const c = r.context;
+  const sp = data.speed;
   const toolName = (id: string) => data.tools.find((t) => t.id === id)?.name || id;
   const toolColor = (id: string) => data.tools.find((t) => t.id === id)?.color || "var(--ink-3)";
-  const bestHour = r.byHour.reduce(
-    (best, h) => (h.genPerMinute > (best?.genPerMinute ?? 0) ? h : best),
-    null as typeof r.byHour[number] | null,
+  const bestHour = (sp?.byHour ?? []).reduce(
+    (best, h) => (h.tok_per_sec > (best?.tok_per_sec ?? 0) ? h : best),
+    null as (typeof sp.byHour)[number] | null,
   );
 
   // ---------- 天级用量 / 成本 ----------
@@ -408,16 +619,18 @@ function RateSection({ data }: { data: Dashboard }) {
           </p>
         </div>
         <div className="caliber-side">
-          <div className="k">生成速度（注脚）</div>
+          <div className="k">生成速度</div>
           <div className="v">
-            {tokens(o.medianPerSecond)}
-            <small>tok/s 中位数</small>
+            {sp.overall.tok_per_sec.toFixed(1)}
+            <small>tok/s</small>
           </div>
           <div className="s">
-            回答的是另一个问题：<b>你写代码时每秒真正写出多少 token</b>。峰值 {tokens(o.peakPerSecond)}。
+            按<b>生成区间</b>估算：同会话相邻两次请求的间隔，就是后一次的生成时长。
+            每请求平均写出 {fmtInt(sp.overall.out_per_req)} 个输出 token。
           </div>
           <div className="s dim">
-            这里只统计输出，不含缓存重读——否则会虚高两个数量级。详见速率统计接口。
+            日志把整次响应的 token 记在<b>完成的那一刻</b>，所以「按秒分桶」会把速度高估约 10 倍；
+            这里改用真实区间，且只统计输出、不含缓存重读。
           </div>
         </div>
       </div>
@@ -427,7 +640,7 @@ function RateSection({ data }: { data: Dashboard }) {
           <div className="section-head" style={{ marginBottom: 16 }}>
             <h2 style={{ fontSize: "var(--fs-title)" }}>每日用量</h2>
             <span className="sub">
-              {bestHour ? `高产时段 ${bestHour.hour}:00` : ""}
+              {bestHour ? `高产时段 ${bestHour.key}:00` : ""}
             </span>
           </div>
           <TrendChart
@@ -530,22 +743,26 @@ function RateSection({ data }: { data: Dashboard }) {
         <div className="panel">
           <div className="section-head" style={{ marginBottom: 16 }}>
             <h2 style={{ fontSize: "var(--fs-title)" }}>时段分布</h2>
-            <span className="sub">活跃分钟内的生成 tok/min</span>
+            <span className="sub">各时段的生成速度（tok/s · 生成区间口径）</span>
           </div>
-          <HourBars hours={r.byHour} valueKey="genPerMinute" format={tokens} />
+          <HourBars
+            hours={sp.byHour.map((h) => ({ hour: Number(h.key), tok_per_sec: h.tok_per_sec }))}
+            valueKey="tok_per_sec"
+            format={(n) => `${n.toFixed(1)} tok/s`}
+          />
         </div>
       </div>
 
       {o.peakBreakdown.length > 0 && (
         <div className="peak-note">
-          生成速度的峰值秒（{tokens(o.peakPerSecond)} tok/s）由{" "}
+          单秒完成量峰值（{tokens(o.peakPerSecond)} token）由{" "}
           {o.peakBreakdown.slice(0, 3).map((b, i) => (
             <span key={b.tool}>
               {i > 0 && "、"}
               <b>{toolName(b.tool)}</b>（{tokens(b.tokens)}）
             </span>
           ))}
-          贡献，通常来自一次长上下文会话。
+          贡献。这<b>不是速率</b>——一次响应的全部输出会在它完成的那一秒整笔入账。
         </div>
       )}
     </section>
@@ -616,14 +833,32 @@ export default function App() {
   const [metric, setMetric] = useState<"total_tokens" | "requests" | "cost_usd">("total_tokens");
   // 分栏：当前看哪一栏。诊断默认放最前——它给的是行动建议，用户最该先看。
   const [tab, setTab] = useState("诊断");
+  // 开机屏（规格表）是否还在。Boot 自己播完揭开动效后回调置 false。
+  // `?noboot` 直接跳过——截图与 CI 冒烟用，也方便老用户刷页时不看动画。
+  const [booting, setBooting] = useState(
+    () => typeof window !== "undefined" && !new URLSearchParams(window.location.search).has("noboot"),
+  );
+  const appRef = useRef<HTMLDivElement>(null);
   const firstRender = useRef(true);
+
+  // 平滑滚动：全局起一次，卸载时拆掉（Lenis + GSAP 共用一个 ticker）
+  useEffect(() => startSmoothScroll(), []);
+
+  // 页面级动效：标题逐行揭示 / 图纸框画线 / 采集流程固定滚动。
+  // 依赖 data 与 tab——切栏会重建 DOM，必须重新装配（gsap.context 一次性 revert）。
+  useEffect(() => {
+    const scope = appRef.current;
+    if (!scope || !data) return;
+    const topbar = scope.querySelector<HTMLElement>(".topbar");
+    return mountSiteMotion(scope, topbar);
+  }, [data, tab]);
 
   /**
    * 切栏后定位到该栏的**第一个区块**，而不是页面顶部。
    *
    * 原来在 onClick 里直接 `scrollTo({ top: 0 })`，理由写的是「否则会停在上一个栏
-   * 滚到一半的位置，看起来像页面没反应」。但 profile + stat-row 是**所有栏共享**的
-   * （渲染在 `<Tab>` 之外），高度约 900px——滚到 0 之后看到的仍是这段共享头部，
+   * 滚到一半的位置，看起来像页面没反应」。但账本抬头 + 工具栏 + 标签栏是**所有栏共享**的
+   * （渲染在 `<Tab>` 之外），高度可观——滚到 0 之后看到的仍是这段共享头部，
    * 真正的栏内容还在首屏之外，用户必须再往下翻一次。
    *
    * 放在 useEffect 里而不是 onClick，是因为要等新栏内容挂载完才量得到位置。
@@ -635,15 +870,36 @@ export default function App() {
       return; // 首次加载不要动滚动位置
     }
     const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    const raf = requestAnimationFrame(() => {
-      // 让第一个区块刚好落在粘性标签栏下方，不被遮住
-      const bar = document.querySelector(".tabbar");
-      const offset = (bar?.getBoundingClientRect().height ?? 0) + 16;
-      const first = document.querySelector("[data-reveal]");
-      const top = first ? first.getBoundingClientRect().top + window.scrollY - offset : 0;
-      window.scrollTo({ top: Math.max(0, top), behavior: reduce ? "auto" : "smooth" });
+
+    /**
+     * 滚到「本栏内容的起点」。
+     *
+     * 之前滚的是 `document.querySelector("[data-reveal]")`——那是**第一个区块**，
+     * 而区块高度依赖内容（图表 SVG 按容器宽算高），切栏时页面总高度会大幅变化，
+     * 「量一次、滚一次」于是经常落空，表现就是点了栏没反应 / 跳不到位。
+     * 改成滚一个**高度稳定**的锚点（紧贴标签栏下方），目标位置不随内容变。
+     *
+     * 另外把粘性顶栏的高度也算进偏移——顶栏和标签栏是叠着粘的，
+     * 只减标签栏高度会差约 60px，落点会被顶栏盖住一截。
+     */
+    const target = () => {
+      const anchor = document.querySelector(".tab-anchor");
+      if (!anchor) return 0;
+      const barH = document.querySelector(".tabbar")?.getBoundingClientRect().height ?? 0;
+      const topH = document.querySelector(".topbar")?.getBoundingClientRect().height ?? 0;
+      return Math.max(0, anchor.getBoundingClientRect().top + window.scrollY - (barH + topH + 16));
+    };
+
+    let raf2 = 0;
+    const raf1 = requestAnimationFrame(() => {
+      scrollWindowTo(target(), !reduce);
+      // 布局稳定后再校正一次：SVG 图表的高度要等一帧才准
+      raf2 = requestAnimationFrame(() => scrollWindowTo(target(), false));
     });
-    return () => cancelAnimationFrame(raf);
+    return () => {
+      cancelAnimationFrame(raf1);
+      cancelAnimationFrame(raf2);
+    };
   }, [tab]);
   const [focusModel, setFocusModel] = useState<string | null>(null);
 
@@ -745,13 +1001,22 @@ export default function App() {
 
   if (!data) {
     return (
-      <div className="boot">
-        <div className="boot-logo">TL</div>
-        <div className="boot-bar">
-          <span />
+      <>
+        <Deco />
+        <Cursor />
+        {booting && (
+          <Boot
+            progress={progress}
+            ready={!loading}
+            tools={[]}
+            events={0}
+            onDone={() => setBooting(false)}
+          />
+        )}
+        <div className="app" ref={appRef}>
+          <div className="app-empty">{loading ? "正在加载用量数据…" : "无数据"}</div>
         </div>
-        <p>{loading ? "正在加载用量数据" : "无数据"}</p>
-      </div>
+      </>
     );
   }
 
@@ -779,10 +1044,33 @@ export default function App() {
     .slice(0, 6)
     .map((m) => ({ label: bareModel(m.model), value: m.cost_usd, color: modelColor(m.model) }));
 
-  return (
-    <div className="app">
-      <div className="bg-grid" aria-hidden />
+  const marqueeItems = data.tools.map((t) => {
+    const row = data.byTool.find((r) => r.tool === t.id);
+    return {
+      name: t.name,
+      value: row ? tokens(row.total_tokens) : "—",
+      color: t.color,
+      absent: !t.installed,
+    };
+  });
 
+  const toolColors = Object.fromEntries(data.tools.map((t) => [t.id, t.color]));
+
+  return (
+    <>
+      <Deco />
+      <Cursor />
+      {booting && (
+        <Boot
+          progress={progress}
+          ready={!loading}
+          tools={data.tools}
+          events={data.dataRange.events}
+          onDone={() => setBooting(false)}
+        />
+      )}
+      <div className={`app${loading ? " is-refreshing" : ""}`} ref={appRef}>
+      {loading && <div className="refresh-bar" aria-hidden />}
       <header className="topbar">
         <div className="brand">
           <span className="brand-mark">TL</span>
@@ -808,25 +1096,18 @@ export default function App() {
         </div>
       </header>
 
-      <ProfileHeader data={data} />
+      <Marquee items={marqueeItems} />
+
+      <div className="sheet-body">
+        <div className="sheet-main">
+      <LedgerHeader data={data} />
 
       <Toolbar range={range} setRange={setRange} tools={data.tools} byTool={data.byTool} />
 
       <TabBar tab={tab} setTab={setTab} />
 
-      <RevealGroup as="section" className="stat-row" step={45} distance={10}>
-        <Metric label="总 Token" value={tokens(o.total_tokens)} sub={`输出 ${tokens(o.output_tokens)}`} />
-        <Metric label="请求" value={fmtInt(o.requests)} sub={`${fmtInt(o.sessions)} 会话`} delay={60} />
-        <Metric label="预估成本" value={fmtCost(o.cost_usd)} sub={`${fmtCost(o.requests ? o.cost_usd / o.requests : 0)}/请求`} delay={120} />
-        <Metric label="缓存命中" value={`${o.cache_hit_rate}%`} sub={`${tokens(o.cache_read_tokens)} 读取`} delay={180} />
-        <Metric label="推理 Token" value={tokens(o.reasoning_tokens)} sub={`输出占比 ${o.output_tokens ? ((o.reasoning_tokens / o.output_tokens) * 100).toFixed(0) : 0}%`} delay={240} />
-        <Metric
-          label="平均延迟"
-          value={o.avg_latency_ms ? fmtMs(o.avg_latency_ms) : "—"}
-          sub={o.failures ? `${fmtInt(o.failures)} 次失败` : "工具未记录"}
-          delay={300}
-        />
-      </RevealGroup>
+      {/* 切栏滚动的锚点：高度稳定，不随各栏内容高度变化 */}
+      <div className="tab-anchor" aria-hidden />
 
       <InsightStrip
         waste={data.waste}
@@ -881,6 +1162,10 @@ export default function App() {
         </section>
       </Tab>
 
+      <Tab name="模型速度" tab={tab}>
+        <SpeedSection data={data} />
+      </Tab>
+
       <Tab name="项目账单" tab={tab}>
         <ProjectSection rows={data.projects} />
       </Tab>
@@ -898,12 +1183,23 @@ export default function App() {
       </Tab>
 
       <Tab name="额度够用吗" tab={tab}>
-        <PaceSection data={data.pace} />
+        <PaceSection data={data.pace} colors={toolColors} />
       </Tab>
 
       <Tab name="购买力" tab={tab}>
         <MallSection
           costUsd={o.cost_usd}
+          /*
+           * 编码时长 = 各天「活跃分钟」之和 / 60（367 小时），
+           * **不是** `rate.overall.activeHours`——后者是「有请求完成的秒数 / 3600」
+           * （约 24 小时），拿它当分母会算出 ¥848/小时这种离谱数字。
+           */
+          activeHours={data.rate.byDay.reduce((a, d) => a + d.activeMinutes, 0) / 60}
+          dailyCost={estimateDailyCost(
+            data.timeseries,
+            o.cost_usd,
+            data.profile.activeDays.length,
+          )}
           stats={{
             totalTokens: o.total_tokens,
             requests: o.requests,
@@ -1134,12 +1430,11 @@ export default function App() {
               采集流程 <span className="live-dot" />
             </h2>
           </div>
-          <ScanFlow
-            progress={progress}
-            tools={data.tools}
-            onScan={() => triggerScan()}
-            onReset={() => triggerReset()}
-          />
+          <div className="pin-section">
+            <div className="pin-inner">
+              <ScanFlow progress={progress} tools={data.tools} />
+            </div>
+          </div>
         </section>
       </Tab>
 
@@ -1149,6 +1444,15 @@ export default function App() {
         </span>
         <span>{fmtInt(data.dataRange.events)} 条事件落库于 ~/.tokenledger/tokenledger.db</span>
       </footer>
-    </div>
+          </div>
+          <Rail
+            data={data}
+            progress={progress}
+            onScan={() => triggerScan()}
+            onReset={() => triggerReset()}
+          />
+        </div>
+      </div>
+    </>
   );
 }

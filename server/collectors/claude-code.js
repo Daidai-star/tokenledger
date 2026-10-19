@@ -20,7 +20,7 @@ export const claudeCode = new Collector({
   id: SOURCE,
   name: "Claude Code",
   website: "https://docs.anthropic.com/en/docs/claude-code",
-  color: "#c15f3c",
+  color: "#4f6f8a",
   roots: [path.join(os.homedir(), ".claude", "projects")],
   detect: () => fs.existsSync(path.join(os.homedir(), ".claude")),
   async scan(ctx) {

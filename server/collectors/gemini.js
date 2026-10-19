@@ -19,7 +19,7 @@ export const gemini = new Collector({
   id: SOURCE,
   name: "Gemini CLI",
   website: "https://github.com/google-gemini/gemini-cli",
-  color: "#8b6f8e",
+  color: "#7d5a6b",
   roots: [path.join(os.homedir(), ".gemini", "tmp")],
   detect: () => fs.existsSync(path.join(os.homedir(), ".gemini")),
   async scan(ctx) {

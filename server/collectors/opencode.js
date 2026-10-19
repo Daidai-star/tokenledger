@@ -24,7 +24,7 @@ export const opencode = new Collector({
   id: SOURCE,
   name: "OpenCode",
   website: "https://opencode.ai",
-  color: "#5b7a99",
+  color: "#3f6f5e",
   roots: [DATA_DIR],
   detect: () => fs.existsSync(DATA_DIR),
   async scan(ctx) {
@@ -95,13 +95,25 @@ function scanSqlite(ctx, file, events) {
       .all();
     seen = rows.length;
 
+    // opencode 的 session_v2 结构随版本变化：
+    // 2.0.x 用 `directory`（**没有** `worktree` 列），早期版本反过来。
+    // 之前写死 `SELECT id, directory, worktree`，在 2.0.x 上直接抛
+    // "no such column: worktree"，被下面的 catch 吞掉——
+    // 结果 opencode 的 cwd 100% 为 null（2,443 条事件一条不落），
+    // 「项目账单」和「最近会话」里这个工具等于没有归属。
+    // 现在按 PRAGMA 读到的真实列名拼 SQL。
     const cwdBySession = new Map();
     try {
-      for (const s of db.prepare("SELECT id, directory, worktree FROM session_v2").all()) {
-        cwdBySession.set(s.id, s.directory || s.worktree || null);
+      const cols = new Set(db.prepare("PRAGMA table_info(session_v2)").all().map((c) => c.name));
+      const candidates = ["directory", "worktree", "path"].filter((c) => cols.has(c));
+      if (candidates.length) {
+        const rows2 = db.prepare(`SELECT id, ${candidates.join(", ")} FROM session_v2`).all();
+        for (const s of rows2) {
+          cwdBySession.set(s.id, candidates.map((c) => s[c]).find((v) => v) || null);
+        }
       }
     } catch {
-      /* session_v2 结构可能随版本变化 */
+      /* 结构再变也不该让整个采集失败，但**不要**静默——见上面的注释 */
     }
 
     for (const row of rows) {

@@ -243,7 +243,14 @@ export function InsightStrip({
  * 诚实标注：月中时投影是估算，会写明「按前 N 天速率外推」。
  * 定价随时会变，估算的口径照实说，不伪装成账单。
  */
-export function PaceSection({ data }: { data: PaceData }) {
+export function PaceSection({
+  data,
+  colors = {},
+}: {
+  data: PaceData;
+  /** tool id → 颜色，与跑马灯 / 右边栏保持一致 */
+  colors?: Record<string, string>;
+}) {
   if (!data.requests || data.spentUsd <= 0) {
     return (
       <section className="section">
@@ -364,7 +371,7 @@ export function PaceSection({ data }: { data: PaceData }) {
                   <div className="pace-track">
                     <div
                       className="pace-fill pace-fill-tool"
-                      style={{ width: `${t.share}%` }}
+                      style={{ width: `${t.share}%`, background: colors[t.tool] }}
                     />
                   </div>
                   <span className="pace-tool-v">{fmtCost(t.cost_usd)}</span>

@@ -74,8 +74,31 @@ function json(res, code, body) {
 }
 
 /** 一次性返回首屏所需的全部数据 */
+/**
+ * 首屏聚合结果缓存。
+ *
+ * `dashboardPayload` 一次要串 17 个查询（全历史实测 ~1.2s，带筛选 ~0.37s）。
+ * 用户切时间范围是**来回切**同一个范围，每次都重算是纯浪费。
+ * 缓存 15 秒 + 扫描完成后失效即可——数据是只读快照的语义，陈旧 15 秒无妨。
+ */
+const dashCache = new Map();
+const DASH_TTL_MS = 15_000;
+const DASH_CACHE_MAX = 24;
+
+function dashKey(range) {
+  return `${range.from || ""}|${range.to || ""}|${(range.tools || []).join(",")}`;
+}
+
+function clearDashCache() {
+  dashCache.clear();
+}
+
 function dashboardPayload(range) {
-  return {
+  const key = dashKey(range);
+  const hit = dashCache.get(key);
+  if (hit && Date.now() - hit.at < DASH_TTL_MS) return hit.value;
+
+  const value = {
     range: { from: range.from || null, to: range.to || null, tools: range.tools || null },
     dataRange: store.dataRange(),
     tools: scanner.tools(),
@@ -95,11 +118,16 @@ function dashboardPayload(range) {
     waste: queries.waste(range),
     guard: queries.guard(range),
     pace: queries.pace({}),
+    speed: queries.speed(range),
     sessions: queries.sessions(range),
     recentEvents: queries.recentEvents({ ...range, limit: 40 }),
     lastScan: store.lastScan(),
     pricingSource: scanner.pricing.source,
   };
+
+  if (dashCache.size >= DASH_CACHE_MAX) dashCache.clear();
+  dashCache.set(key, { at: Date.now(), value });
+  return value;
 }
 
 // ---------------------------------------------------------------- routes
@@ -155,13 +183,13 @@ const routes = {
   "POST /api/scan": async () => {
     if (scanner.running) return { started: false, reason: "already running" };
     // 后台跑，客户端用 SSE 看进度
-    scanner.run().catch(() => {});
+    scanner.run().then(clearDashCache).catch(() => {});
     return { started: true };
   },
 
   "POST /api/reset": async () => {
     if (scanner.running) return { started: false, reason: "already running" };
-    scanner.reset().catch(() => {});
+    scanner.reset().then(clearDashCache).catch(() => {});
     return { started: true };
   },
 
